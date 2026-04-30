@@ -16,6 +16,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # GH-hosted runners ship with ~7 GB RAM and no swap. `next build`'s
+      # prerender phase peaks past 5 GB of heap; without swap the kernel
+      # OOM-kills it before the bundle is generated.
+      - name: Add 8 GB swap
+        run: |
+          sudo fallocate -l 8G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          free -h
+
       - uses: cachix/install-nix-action@v31
         with:
           extra_nix_config: |

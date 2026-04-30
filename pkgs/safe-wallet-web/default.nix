@@ -80,6 +80,12 @@ stdenv.mkDerivation {
   NEXT_PUBLIC_IS_PRODUCTION = if isProduction then "true" else "false";
   NEXT_TELEMETRY_DISABLED = "1";
 
+  # The prerender phase peaks past 5 GB of Node heap. Node 20's default
+  # cap is ~2 GB → SIGABRT; bump it. 6 GB fits inside a GH-hosted runner
+  # (7 GB total) once we've added swap (.github/workflows/build.yml),
+  # and is comfortably under the kart's headroom.
+  NODE_OPTIONS = "--max-old-space-size=6144";
+
   postPatch = ''
     # Bake brand strings at build time — matches the runtime nginx
     # sub_filter we used to apply.
