@@ -85,9 +85,9 @@ stdenv.mkDerivation {
   NEXT_TELEMETRY_DISABLED = "1";
 
   # The prerender phase peaks past 5 GB of Node heap. Node 20's default
-  # cap is ~2 GB → SIGABRT; bump it. 6 GB fits inside a GH-hosted runner
-  # (7 GB total) once we've added swap (.github/workflows/build.yml),
-  # and is comfortably under the kart's headroom.
+  # cap is ~2 GB → SIGABRT; bump it. 6 GB is comfortable on the kart and
+  # any host with reasonable headroom (this build is not intended to run
+  # on a 7 GB GH-hosted runner).
   NODE_OPTIONS = "--max-old-space-size=6144";
 
   postPatch = ''

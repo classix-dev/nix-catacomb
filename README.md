@@ -29,7 +29,6 @@ hosts/catacomb/
   nginx.nix                     TLS termination + ACME wrapper
   ui.nix                        host-served static UI + backend path-fanout locations
 pkgs/safe-wallet-web/           Nix derivation that builds apps/web statically
-.github/workflows/build.yml     cachix push (https://classix.cachix.org)
 ```
 
 ## Deploying guide
@@ -135,11 +134,10 @@ Branding is **baked at build time**:
   as `NEXT_PUBLIC_*` env vars consumed by `next build`.
 
 Any change to those values triggers a rebuild of the UI derivation. A
-single build takes ~5–10 min on a 4 vCPU box; cachix
-([`https://classix.cachix.org`](https://classix.cachix.org)) absorbs
-the cost when nothing changed. The flake declares it as a substituter
-in `nixConfig`, and the `build.yml` workflow pushes every store path to
-it on `main`.
+single build takes ~5–10 min on a 4 vCPU box; downstream deploy flakes
+that consume `nixosModules.catacomb` are expected to wire up their own
+binary cache (substituter + push) so that `nixos-rebuild switch` doesn't
+rebuild the bundle on every host.
 
 **Theme colors** (`branding.theme.*`) still get POSTed per chain to
 `cfg-service` by the `catacomb-chain-bootstrap` systemd oneshot — those

@@ -1,13 +1,6 @@
 {
   description = "Nix flake for provisioning cloud VMs (nixos-anywhere + disko).";
 
-  nixConfig = {
-    extra-substituters = [ "https://classix.cachix.org" ];
-    extra-trusted-public-keys = [
-      "classix.cachix.org-1:wwRxPZ1+4aY6IWpf+7xBxoc0MBrYQB9GsSNSKwLzqBo="
-    ];
-  };
-
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
