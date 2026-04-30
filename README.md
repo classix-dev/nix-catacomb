@@ -4,7 +4,7 @@ Nix flake that deploys a self-hosted [Safe](https://safe.global) multi-sig
 wallet onto a single VM, branded and configured via Nix module options.
 
 The default chain is **Ethereum Classic** (61), branded as
-*Classix Catacomb Multi-Sig*; both are overrideable.
+*Catacomb Multisig Classix Edition*; both are overrideable.
 
 The stack is upstream `safe-global/safe-infrastructure`'s docker-compose
 project run verbatim against a NixOS-managed Docker daemon, plus a
@@ -36,7 +36,7 @@ The upstream reference deployment is [`safe-global/safe-infrastructure`](https:/
 ## Layout
 
 ```
-flake.nix                       inputs, devShell, nixosConfigurations.catacomb
+flake.nix                       inputs, devShell, nixosModules.catacomb, packages
 hosts/catacomb/
   default.nix                   base NixOS (boot, ssh, docker, firewall)
   options.nix                   declares every catacomb.* option
@@ -45,9 +45,22 @@ hosts/catacomb/
   safe-stack.nix                upstream safe-infrastructure compose stack
   override.yml.tmpl             per-deploy compose override (env, image pins, ui-stub)
   nginx.nix                     TLS termination + ACME wrapper
-  ui.nix                        host-served static UI + backend path-fanout locations
-pkgs/safe-wallet-web/           Nix derivation that builds apps/web statically
+  ui.nix                        host-served static UI + /assets/ + backend fanout
+pkgs/
+  safe-wallet-web/              static `next export` build (pure: src + env in, UI out)
+  catacomb-branding/            branding overlay applied to safe-wallet-web src
+    patches/                    React/CSS patch (header wordmark, footer, banner, favicon)
+    fonts/                      Michroma + Space Grotesk webfonts
+assets/
+  etc-logo.svg                  served at /assets/etc-logo.svg; default favicon SVG
 ```
+
+The branding overlay is toggled by `catacomb.branding.enable` (default
+`true`). When false, the wallet builds vanilla Safe with only
+`branding.appName` swapped via the upstream-supported
+`NEXT_PUBLIC_BRAND_NAME`. When true, the patch + fonts + favicon land
+in the bundle and `branding.{tagline,notification,githubRepoLink,footerLinks,faviconSvg}`
+all become live.
 
 ## Deploying guide
 

@@ -53,9 +53,9 @@ in
           name = "Ether Classic";
           symbol = "ETC";
           decimals = 18;
-          logoUri = "https://blockscout.com/etc/mainnet/images/logo.png";
+          logoUri = "https://${d}/assets/etc-logo.svg";
         };
-        chainLogoUri = "https://blockscout.com/etc/mainnet/images/logo.png";
+        chainLogoUri = "https://${d}/assets/etc-logo.svg";
       };
     };
   };

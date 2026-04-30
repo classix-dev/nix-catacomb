@@ -56,10 +56,98 @@
 
     # ── Branding ─────────────────────────────────────────────────────────
     branding = {
+      enable = mkOption {
+        type = types.bool;
+        default = true;
+        description = ''
+          Apply the Catacomb branding overlay (`pkgs/catacomb-branding`)
+          on top of upstream `safe-wallet-monorepo`. When true: header
+          wordmark + tagline, custom footer links, top-of-page
+          notification banner, SVG-only favicon, Catacomb fonts. When
+          false: vanilla Safe wallet with only `branding.appName` swapped
+          via the upstream-supported `NEXT_PUBLIC_BRAND_NAME`. The
+          consumer-supplied tagline/notification/footerLinks/githubRepoLink
+          options become no-ops with `enable = false` (no patch reads them).
+        '';
+      };
       appName = mkOption {
         type = types.str;
         example = "Acme Multi-Sig";
         description = "Product name shown in page title, headers, and footer.";
+      };
+      tagline = mkOption {
+        type = types.str;
+        default = "";
+        example = "classix edition";
+        description = ''
+          Subtitle rendered under the app name in the top-left wordmark.
+          Empty string hides the line entirely. Wired into the bundle as
+          `NEXT_PUBLIC_CATACOMB_TAGLINE`. Only meaningful with
+          `branding.enable = true`.
+        '';
+      };
+      notification = mkOption {
+        type = types.str;
+        default = "";
+        example = "Demo deploy — do not use with production assets.";
+        description = ''
+          Top-of-page warning banner shown across every route. Empty
+          string hides the banner entirely. Rendered as a MUI
+          `<Alert severity="warning">` above the header. Wired in as
+          `NEXT_PUBLIC_CATACOMB_NOTIFICATION`. Only meaningful with
+          `branding.enable = true`.
+        '';
+      };
+      githubRepoLink = mkOption {
+        type = types.str;
+        default = "";
+        example = "https://github.com/classix-dev/nix-catacomb";
+        description = ''
+          Replaces the upstream `safe-global/safe-wallet-monorepo` URL
+          that the footer's `vX.Y.Z` link points at. Empty string falls
+          through to the upstream default (`APP_HOMEPAGE`). Wired in as
+          `NEXT_PUBLIC_CATACOMB_GITHUB_REPO`. Only meaningful with
+          `branding.enable = true`.
+        '';
+      };
+      footerLinks = mkOption {
+        type = types.listOf (
+          types.submodule {
+            options = {
+              label = mkOption {
+                type = types.str;
+                description = "Visible link text.";
+              };
+              url = mkOption {
+                type = types.str;
+                description = "Target URL — opens in a new tab.";
+              };
+            };
+          }
+        );
+        default = [ ];
+        example = lib.literalExpression ''
+          [
+            { label = "classix.dev"; url = "https://classix.dev"; }
+          ]
+        '';
+        description = ''
+          Links rendered in the footer alongside the version string.
+          Replaces the upstream "unofficial distribution of the app" line.
+          Serialised to JSON and read at build time as
+          `NEXT_PUBLIC_CATACOMB_FOOTER_LINKS`. Only meaningful with
+          `branding.enable = true`.
+        '';
+      };
+      faviconSvg = mkOption {
+        type = types.path;
+        default = ../../assets/etc-logo.svg;
+        description = ''
+          SVG used as the wallet's favicon (and `safari-pinned-tab.svg`).
+          Defaults to the library's ETC chain logo — appropriate for
+          Catacomb deploys built around ETC, which is the canonical
+          chain. Override for non-Classix Catacombs.
+        '';
       };
       theme = {
         textColor = mkOption {
