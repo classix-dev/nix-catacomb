@@ -79,10 +79,14 @@ let
   '';
 
   # docker compose invocation used by every catacomb-stack systemd unit.
+  # `--project-directory ${stateDir}` so upstream's relative bind mounts
+  # (`./data/<svc>-db`, `./docker/nginx/nginx.conf`) resolve under our
+  # writable /var/lib/catacomb/, with symlinks pointing back to the
+  # read-only nix store for the static bits.
   composeExe = "${pkgs.docker-compose}/bin/docker-compose";
   composeArgs = lib.concatStringsSep " " [
-    "--project-directory ${safe-infrastructure}"
-    "-f ${safe-infrastructure}/docker-compose.yml"
+    "--project-directory ${stateDir}"
+    "-f ${stateDir}/docker-compose.yml"
     "-f ${overrideFile}"
     "--env-file ${envFile}"
     "--project-name catacomb"
@@ -125,6 +129,15 @@ in
       ExecStart = pkgs.writeShellScript "catacomb-stack-up" ''
         set -eu
         umask 077
+
+        # Stage upstream's project tree under ${stateDir} so its relative
+        # bind mounts (./data/<svc>-db, ./docker/nginx/nginx.conf,
+        # container_env_files/<svc>.env) resolve to a writable directory
+        # backed by the read-only nix store for static bits.
+        mkdir -p ${stateDir}/data
+        ln -sfn ${safe-infrastructure}/docker-compose.yml ${stateDir}/docker-compose.yml
+        ln -sfn ${safe-infrastructure}/docker ${stateDir}/docker
+        ln -sfn ${safe-infrastructure}/container_env_files ${stateDir}/container_env_files
 
         # Generate / reuse runtime secrets (idempotent).
         gen() {
