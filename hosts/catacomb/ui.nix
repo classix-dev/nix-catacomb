@@ -59,8 +59,10 @@ let
   # Static assets served at https://${domain}/assets/. Currently just
   # the ETC chain logo, used both as the chain logo (referenced by
   # `chains.etc.{nativeCurrency.logoUri, chainLogoUri}`) and as the
-  # default favicon SVG inside the wallet bundle.
-  staticAssets = ../../assets;
+  # default favicon SVG inside the wallet bundle. Lives under
+  # `pkgs/catacomb-branding/assets/` so the branding module owns its
+  # own visual identity.
+  staticAssets = ../../pkgs/catacomb-branding/assets;
 in
 {
   services.nginx.virtualHosts."${d}" = {

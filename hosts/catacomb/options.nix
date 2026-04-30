@@ -141,7 +141,7 @@
       };
       faviconSvg = mkOption {
         type = types.path;
-        default = ../../assets/etc-logo.svg;
+        default = ../../pkgs/catacomb-branding/assets/etc-logo.svg;
         description = ''
           SVG used as the wallet's favicon (and `safari-pinned-tab.svg`).
           Defaults to the library's ETC chain logo — appropriate for

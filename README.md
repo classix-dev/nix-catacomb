@@ -49,10 +49,10 @@ hosts/catacomb/
 pkgs/
   safe-wallet-web/              static `next export` build (pure: src + env in, UI out)
   catacomb-branding/            branding overlay applied to safe-wallet-web src
-    patches/                    React/CSS patch (header wordmark, footer, banner, favicon)
+    patches/                    React/CSS patch (header wordmark, footer, modal, favicon)
     fonts/                      Michroma + Space Grotesk webfonts
-assets/
-  etc-logo.svg                  served at /assets/etc-logo.svg; default favicon SVG
+    assets/
+      etc-logo.svg              served at /assets/etc-logo.svg; default favicon SVG
 ```
 
 The branding overlay is toggled by `catacomb.branding.enable` (default

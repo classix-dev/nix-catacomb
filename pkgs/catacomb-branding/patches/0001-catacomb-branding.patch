@@ -172,35 +172,70 @@
            </ExternalLink>
 --- a/apps/web/src/components/common/PageLayout/index.tsx
 +++ b/apps/web/src/components/common/PageLayout/index.tsx
-@@ -1,6 +1,9 @@
+@@ -1,6 +1,15 @@
  import { useContext, useEffect, useState, type ReactElement } from 'react'
  import classnames from 'classnames'
  import { AnimatePresence, motion } from 'motion/react'
-+import Alert from '@mui/material/Alert'
++import Button from '@mui/material/Button'
++import Dialog from '@mui/material/Dialog'
++import DialogActions from '@mui/material/DialogActions'
++import DialogContent from '@mui/material/DialogContent'
++import DialogContentText from '@mui/material/DialogContentText'
++import DialogTitle from '@mui/material/DialogTitle'
 +
 +const CATACOMB_NOTIFICATION = process.env.NEXT_PUBLIC_CATACOMB_NOTIFICATION || ''
++const CATACOMB_NOTIFICATION_ACK_KEY = 'catacomb:notification:ack'
  
  import Topbar from '@/components/common/Header/Topbar'
  import Header from '@/components/common/Header'
-@@ -61,6 +64,23 @@
+@@ -59,8 +68,52 @@
+     setFullWidth(!isSidebarVisible)
+   }, [isSidebarVisible, setFullWidth])
  
++  // Catacomb notification: full-screen modal on first visit per
++  // browser session. SessionStorage gates re-display within the same
++  // tab/session; closing all tabs and reopening shows it again.
++  const [catacombNotificationOpen, setCatacombNotificationOpen] = useState(false)
++  useEffect(() => {
++    if (!CATACOMB_NOTIFICATION) return
++    if (typeof window === 'undefined') return
++    let acknowledged = false
++    try {
++      acknowledged = window.sessionStorage.getItem(CATACOMB_NOTIFICATION_ACK_KEY) === '1'
++    } catch {
++      // sessionStorage may throw in private mode / disabled — fall through and show
++    }
++    if (!acknowledged) setCatacombNotificationOpen(true)
++  }, [])
++  const handleCatacombNotificationAck = () => {
++    setCatacombNotificationOpen(false)
++    try {
++      window.sessionStorage.setItem(CATACOMB_NOTIFICATION_ACK_KEY, '1')
++    } catch {
++      // ignore — acknowledgement not persisted, but user has seen it this load
++    }
++  }
++
    return (
      <>
 +      {CATACOMB_NOTIFICATION && (
-+        <Alert
-+          severity="warning"
-+          icon={false}
-+          sx={{
-+            borderRadius: 0,
-+            justifyContent: 'center',
-+            textAlign: 'center',
-+            py: 0.5,
-+            fontSize: '0.85rem',
-+            '& .MuiAlert-message': { width: '100%', textAlign: 'center', py: 0 },
-+          }}
++        <Dialog
++          open={catacombNotificationOpen}
++          aria-labelledby="catacomb-notification-title"
++          aria-describedby="catacomb-notification-text"
++          maxWidth="xs"
++          fullWidth
 +        >
-+          {CATACOMB_NOTIFICATION}
-+        </Alert>
++          <DialogTitle id="catacomb-notification-title">Heads up</DialogTitle>
++          <DialogContent>
++            <DialogContentText id="catacomb-notification-text">{CATACOMB_NOTIFICATION}</DialogContentText>
++          </DialogContent>
++          <DialogActions>
++            <Button onClick={handleCatacombNotificationAck} autoFocus variant="contained">
++              OK
++            </Button>
++          </DialogActions>
++        </Dialog>
 +      )}
 +
        {!hideHeader && isSpaceRoute && (

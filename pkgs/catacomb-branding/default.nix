@@ -23,7 +23,7 @@
   # The wallet's apex favicon. Defaults to the chain logo we ship for
   # the library's default ETC chain; consumers point this at their own
   # SVG for non-Classix Catacomb deploys.
-  faviconSvg ? ../../assets/etc-logo.svg,
+  faviconSvg ? ./assets/etc-logo.svg,
 }:
 applyPatches {
   name = "safe-wallet-monorepo-catacomb";
