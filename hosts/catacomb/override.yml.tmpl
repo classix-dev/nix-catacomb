@@ -1,15 +1,46 @@
+# Restart policy applied to every container in the stack. Upstream's
+# `docker-compose.yml` ships no restart policy, so a process that exits
+# would otherwise stay exited until a human ran `systemctl restart
+# catacomb-stack`. `unless-stopped` lets `docker compose down` continue
+# to work for clean shutdowns.
+x-restart: &restart
+  restart: unless-stopped
+
 services:
-  cfg-db:        { environment: { POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}" } }
-  cgw-db:        { environment: { POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}" } }
-  txs-db:        { environment: { POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}" } }
-  events-db:     { environment: { POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}" } }
+  # ── Postgres DBs ─────────────────────────────────────────────────────
+  cfg-db:
+    <<: *restart
+    environment: { POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}" }
+  cgw-db:
+    <<: *restart
+    environment: { POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}" }
+  txs-db:
+    <<: *restart
+    environment: { POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}" }
+  events-db:
+    <<: *restart
+    environment: { POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}" }
 
-  # RabbitMQ 4.x disables `transient_nonexcl_queues` which Celery's default
-  # queue declaration relies on. Pin to 3.13 until upstream celery updates.
-  txs-rabbitmq:     { image: "rabbitmq:3.13-alpine" }
-  general-rabbitmq: { image: "rabbitmq:3.13-alpine" }
+  # ── Redis ────────────────────────────────────────────────────────────
+  cgw-redis: *restart
+  txs-redis: *restart
 
+  # ── RabbitMQ ─────────────────────────────────────────────────────────
+  # 4.x disables `transient_nonexcl_queues` which Celery's default queue
+  # declaration relies on. Pin to 3.13 until upstream celery updates.
+  txs-rabbitmq:
+    <<: *restart
+    image: "rabbitmq:3.13-alpine"
+  general-rabbitmq:
+    <<: *restart
+    image: "rabbitmq:3.13-alpine"
+
+  # ── Internal compose-stack nginx (path fanout on :8000) ──────────────
+  nginx: *restart
+
+  # ── Application services ─────────────────────────────────────────────
   cfg-web:
+    <<: *restart
     environment:
       SECRET_KEY: "${DJANGO_SECRET}"
       DJANGO_SUPERUSER_PASSWORD: "${DJANGO_SUPERUSER_PASSWORD}"
@@ -19,12 +50,14 @@ services:
       CSRF_TRUSTED_ORIGINS: "https://@CATACOMB_DOMAIN@"
 
   txs-web:
+    <<: *restart
     environment:
       DJANGO_SECRET_KEY: "${DJANGO_SECRET}"
       DATABASE_URL: "psql://postgres:${POSTGRES_PASSWORD}@txs-db:5432/postgres"
       CSRF_TRUSTED_ORIGINS: "https://@CATACOMB_DOMAIN@"
 
   txs-worker-indexer: &txs-worker-overrides
+    <<: *restart
     environment:
       DJANGO_SECRET_KEY: "${DJANGO_SECRET}"
       DATABASE_URL: "psql://postgres:${POSTGRES_PASSWORD}@txs-db:5432/postgres"
@@ -34,10 +67,12 @@ services:
   txs-scheduler: *txs-worker-overrides
 
   events-web:
+    <<: *restart
     environment:
       DATABASE_URL: "psql://postgres:${POSTGRES_PASSWORD}@events-db:5432/postgres"
 
   cgw-web:
+    <<: *restart
     environment:
       AUTH_TOKEN: "${CGW_AUTH_TOKEN}"
       AUTH_POST_LOGIN_REDIRECT_URI: "https://@CATACOMB_DOMAIN@/"
@@ -50,6 +85,7 @@ services:
   # Gone to make stray internal hits visible. Reuses `nginx:alpine` (the
   # internal nginx already pulls this image).
   ui:
+    <<: *restart
     image: nginx:alpine
     entrypoint: [ "sh", "-c" ]
     command:
