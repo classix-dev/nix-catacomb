@@ -172,7 +172,7 @@
            </ExternalLink>
 --- a/apps/web/src/components/common/PageLayout/index.tsx
 +++ b/apps/web/src/components/common/PageLayout/index.tsx
-@@ -1,6 +1,15 @@
+@@ -1,6 +1,20 @@
  import { useContext, useEffect, useState, type ReactElement } from 'react'
  import classnames from 'classnames'
  import { AnimatePresence, motion } from 'motion/react'
@@ -185,34 +185,49 @@
 +
 +const CATACOMB_NOTIFICATION = process.env.NEXT_PUBLIC_CATACOMB_NOTIFICATION || ''
 +const CATACOMB_NOTIFICATION_ACK_KEY = 'catacomb:notification:ack'
++// Re-show the notification modal once an hour. The most recent ack
++// timestamp lives in localStorage; a 1-min poll re-evaluates so a
++// user who never reloads still sees the modal again on schedule.
++const CATACOMB_NOTIFICATION_INTERVAL_MS = 60 * 60 * 1000
++const CATACOMB_NOTIFICATION_POLL_MS = 60 * 1000
  
  import Topbar from '@/components/common/Header/Topbar'
  import Header from '@/components/common/Header'
-@@ -59,8 +68,52 @@
+@@ -59,8 +73,62 @@
      setFullWidth(!isSidebarVisible)
    }, [isSidebarVisible, setFullWidth])
  
-+  // Catacomb notification: full-screen modal on first visit per
-+  // browser session. SessionStorage gates re-display within the same
-+  // tab/session; closing all tabs and reopening shows it again.
++  // Catacomb notification: full-screen modal that re-fires every
++  // CATACOMB_NOTIFICATION_INTERVAL_MS. localStorage holds the last ack
++  // timestamp; we re-evaluate on mount and on a 1-min poll so a user
++  // who never reloads still sees the modal again on schedule.
 +  const [catacombNotificationOpen, setCatacombNotificationOpen] = useState(false)
 +  useEffect(() => {
 +    if (!CATACOMB_NOTIFICATION) return
 +    if (typeof window === 'undefined') return
-+    let acknowledged = false
-+    try {
-+      acknowledged = window.sessionStorage.getItem(CATACOMB_NOTIFICATION_ACK_KEY) === '1'
-+    } catch {
-+      // sessionStorage may throw in private mode / disabled — fall through and show
++    const evaluate = () => {
++      let lastAck = 0
++      try {
++        const raw = window.localStorage.getItem(CATACOMB_NOTIFICATION_ACK_KEY)
++        const parsed = raw ? Number(raw) : 0
++        lastAck = Number.isFinite(parsed) && parsed > 0 ? parsed : 0
++      } catch {
++        // localStorage may throw in private mode / disabled — treat as never acked
++      }
++      if (Date.now() - lastAck >= CATACOMB_NOTIFICATION_INTERVAL_MS) {
++        setCatacombNotificationOpen(true)
++      }
 +    }
-+    if (!acknowledged) setCatacombNotificationOpen(true)
++    evaluate()
++    const id = window.setInterval(evaluate, CATACOMB_NOTIFICATION_POLL_MS)
++    return () => window.clearInterval(id)
 +  }, [])
 +  const handleCatacombNotificationAck = () => {
 +    setCatacombNotificationOpen(false)
 +    try {
-+      window.sessionStorage.setItem(CATACOMB_NOTIFICATION_ACK_KEY, '1')
++      window.localStorage.setItem(CATACOMB_NOTIFICATION_ACK_KEY, String(Date.now()))
 +    } catch {
-+      // ignore — acknowledgement not persisted, but user has seen it this load
++      // ignore — ack not persisted, but the user has seen it this load
 +    }
 +  }
 +
