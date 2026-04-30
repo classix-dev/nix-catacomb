@@ -1,0 +1,61 @@
+services:
+  cfg-db:        { environment: { POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}" } }
+  cgw-db:        { environment: { POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}" } }
+  txs-db:        { environment: { POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}" } }
+  events-db:     { environment: { POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}" } }
+
+  # RabbitMQ 4.x disables `transient_nonexcl_queues` which Celery's default
+  # queue declaration relies on. Pin to 3.13 until upstream celery updates.
+  txs-rabbitmq:     { image: "rabbitmq:3.13-alpine" }
+  general-rabbitmq: { image: "rabbitmq:3.13-alpine" }
+
+  cfg-web:
+    environment:
+      SECRET_KEY: "${DJANGO_SECRET}"
+      DJANGO_SUPERUSER_PASSWORD: "${DJANGO_SUPERUSER_PASSWORD}"
+      DJANGO_SUPERUSER_EMAIL: "admin@@CATACOMB_DOMAIN@"
+      CGW_AUTH_TOKEN: "${CGW_AUTH_TOKEN}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
+      CSRF_TRUSTED_ORIGINS: "https://@CATACOMB_DOMAIN@"
+
+  txs-web:
+    environment:
+      DJANGO_SECRET_KEY: "${DJANGO_SECRET}"
+      DATABASE_URL: "psql://postgres:${POSTGRES_PASSWORD}@txs-db:5432/postgres"
+      CSRF_TRUSTED_ORIGINS: "https://@CATACOMB_DOMAIN@"
+
+  txs-worker-indexer: &txs-worker-overrides
+    environment:
+      DJANGO_SECRET_KEY: "${DJANGO_SECRET}"
+      DATABASE_URL: "psql://postgres:${POSTGRES_PASSWORD}@txs-db:5432/postgres"
+
+  txs-worker-contracts-tokens: *txs-worker-overrides
+  txs-worker-notifications-webhooks: *txs-worker-overrides
+  txs-scheduler: *txs-worker-overrides
+
+  events-web:
+    environment:
+      DATABASE_URL: "psql://postgres:${POSTGRES_PASSWORD}@events-db:5432/postgres"
+
+  cgw-web:
+    environment:
+      AUTH_TOKEN: "${CGW_AUTH_TOKEN}"
+      AUTH_POST_LOGIN_REDIRECT_URI: "https://@CATACOMB_DOMAIN@/"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
+
+  ui:
+    environment:
+      NEXT_PUBLIC_GATEWAY_URL_PRODUCTION: "https://@CATACOMB_DOMAIN@/cgw"
+      NEXT_PUBLIC_DEFAULT_MAINNET_CHAIN_ID: "@CATACOMB_CHAIN_ID@"
+      NEXT_PUBLIC_IS_PRODUCTION: "true"
+      # `next build` runs at container-start to bake in NEXT_PUBLIC_* env
+      # vars. Default 2 GB heap OOMs; 6 GB exceeds host headroom alongside
+      # the rest of the stack. 3 GB fits.
+      NODE_OPTIONS: "--max-old-space-size=3072"
+    volumes:
+      # Persist the Next.js build cache so subsequent restarts skip the
+      # ~10-min rebuild. First boot still pays the build cost.
+      - ui-next-cache:/app/apps/web/.next
+
+volumes:
+  ui-next-cache: {}
