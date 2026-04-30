@@ -75,6 +75,10 @@ stdenv.mkDerivation {
     nodejs_20
   ];
 
+  # Brand name flows through `apps/web/src/config/constants.ts:BRAND_NAME`
+  # — set NEXT_PUBLIC_BRAND_NAME and every consumer (page titles, OG
+  # tags, in-app references) picks it up.
+  NEXT_PUBLIC_BRAND_NAME = appName;
   NEXT_PUBLIC_GATEWAY_URL_PRODUCTION = gatewayUrl;
   NEXT_PUBLIC_DEFAULT_MAINNET_CHAIN_ID = toString defaultChainId;
   NEXT_PUBLIC_IS_PRODUCTION = if isProduction then "true" else "false";
@@ -87,24 +91,11 @@ stdenv.mkDerivation {
   NODE_OPTIONS = "--max-old-space-size=6144";
 
   postPatch = ''
-    # Bake brand strings at build time — matches the runtime nginx
-    # sub_filter we used to apply.
-    grep -rlZ --include='*.ts' --include='*.tsx' --include='*.js' \
-      --include='*.jsx' --include='*.json' --include='*.html' \
-      --include='*.mdx' \
-      -e 'Safe{Wallet}' -e 'Safe Wallet' apps/web packages \
-      2>/dev/null \
-      | xargs -0r sed -i \
-          -e 's/Safe{Wallet}/${appName}/g' \
-          -e 's/Safe Wallet/${appName}/g'
-
     # `yarn fetch-chains` makes a network call to seed chain metadata —
     # incompatible with the Nix build sandbox. The app falls back to a
     # runtime fetch from CGW (which is what fetch-chains itself only
-    # *speeds up*; see its own header comment). Also pass `--no-lint`:
-    # release artefact, lint enforcement is a CI-time concern, and our
-    # brand substitution above can change `Safe{Wallet}` to a literal
-    # string that trips `react/jsx-curly-brace-presence`.
+    # *speeds up*; see its own header comment). `--no-lint` skips
+    # eslint enforcement (release artefact, not a dev run).
     substituteInPlace apps/web/package.json \
       --replace-fail '"build": "yarn fetch-chains && next build"' \
                      '"build": "next build --no-lint"'
