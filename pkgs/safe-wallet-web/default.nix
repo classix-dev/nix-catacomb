@@ -110,6 +110,13 @@ stdenv.mkDerivation (
       # placeholder so the app falls back to its runtime CGW fetch.
       mkdir -p apps/web/src/config/__generated__
       echo '[]' > apps/web/src/config/__generated__/chains.json
+
+      # Show 2 decimal places for fiat values under $100. Upstream's
+      # threshold is $1, which renders e.g. ETC at $8.41 as "$8" — fine
+      # for $bn portfolios, terrible for low-cap chains.
+      substituteInPlace packages/utils/src/utils/formatNumber.ts \
+        --replace-fail 'Math.abs(float) >= 1 || float === 0 ? 0 : 2' \
+                       'Math.abs(float) >= 100 || float === 0 ? 0 : 2'
     '';
 
     buildPhase = ''
