@@ -191,10 +191,7 @@ nix flake check      # statix, deadnix, treefmt as flake checks
 
 ## Known gaps
 
-- The bundled `txs` compose project indexes a single chain. Adding more
-  chains to `catacomb.chains` only registers them in cfg-service; Safe
-  interactions on the extra chains will fail until you stand up a
-  per-chain `txs-*` stack and point each `transactionService` at it.
+- TODO: multi chain
 - The UI build skips `yarn fetch-chains` (network-dependent); the app
   falls back to a runtime CGW request, costing one extra round-trip
   before first paint.
