@@ -21,7 +21,7 @@ The upstream reference deployment is [`safe-global/safe-infrastructure`](https:/
 
 - **Frontend tamper-resistance.** The Nix store is mounted read-only at the kernel level. Modifying the served bundle requires a new build with a new hash; in-place edits aren't a path.
 - **Hash-pinned supply chain.** Upstream's `.env.sample` pulls every Safe service at `:latest`; here we pin exact image tags (see `hosts/catacomb/safe-stack.nix`) and lock every nixpkgs commit, fetched tarball, and transitive dep in `flake.lock`. The "auto-pull a malicious 1.0.1" class (event-stream, ua-parser-js, colors.js) is structurally impossible without an explicit `nix flake update`.
-- **Deterministic, composable patch overlays.** ETC-specific changes (branding, chain integration) are small named files (`patches/0001-catacomb-branding.patch`) layered at build time over a hash-pinned upstream `safe-wallet-monorepo`. Same patch + same upstream → same bundle hash, every time. The full divergence from stock Safe is one diff; no vendored fork to keep in sync.
+- **Deterministic, composable patch overlays.** Catacomb branding (`pkgs/catacomb-branding/patches/0001-catacomb-branding.patch`) is layered at build time over a hash-pinned upstream `safe-wallet-monorepo`. Same patch + same upstream → same bundle hash, every time. The full divergence from stock Safe is one diff; no vendored fork to keep in sync.
 - **Server has only what's declared.** NixOS ships no leftover distro utilities and no container-base shells or package managers — every binary, port, service, and user is in `hosts/catacomb/*.nix`, reviewable in a PR diff.
 - **No JS build runs on the host.** Upstream's `safeglobal/safe-wallet-web` container runs `yarn build` (a Next.js compile that executes hundreds of npm packages' build hooks) every time it starts. Here, that compile happens in a Nix sandbox at deploy time elsewhere; the production VM only serves static files.
 - **Atomic rollback.** `nixos-rebuild --rollback` reverts kernel + packages + configs together; a botched deploy is one command back to the prior generation.
@@ -67,8 +67,10 @@ all become live.
 This repo is a *library* flake — it exposes `nixosModules.catacomb` and a
 `packages.safe-wallet-web-static` derivation, but it doesn't deploy itself.
 Wrap it in a small consumer flake that pins the library and supplies your
-domain / SSH keys / branding. A worked example lives at
-[`local/flake.nix.example`](./local/flake.nix.example).
+domain, ACME email, and SSH keys. A worked example lives at
+[`consumer.example.nix`](./consumer.example.nix); it includes the
+DigitalOcean bootstrap (cloud-init + disko collisions) and commented
+override blocks for every `catacomb.*` option.
 <!-- TODO: link to a public sample deployment flake once one is published. -->
 
 
@@ -78,8 +80,8 @@ Outside of this repo:
 
 ```sh
 mkdir my-catacomb && cd my-catacomb
-cp /path/to/nix-catacomb/local/flake.nix.example flake.nix
-$EDITOR flake.nix      # set domain, acmeEmail, sshAuthorizedKeys, branding
+cp /path/to/nix-catacomb/consumer.example.nix flake.nix
+$EDITOR flake.nix      # set domain, acmeEmail, sshAuthorizedKeys
 nix flake lock
 ```
 
@@ -160,12 +162,20 @@ runtime build on the droplet.
 Per-deploy values are baked at build time via `NEXT_PUBLIC_*` env vars,
 which Next.js inlines into the compiled bundle:
 
-| Env var                                | Source                          |
-|----------------------------------------|---------------------------------|
-| `NEXT_PUBLIC_BRAND_NAME`               | `catacomb.branding.appName`     |
-| `NEXT_PUBLIC_GATEWAY_URL_PRODUCTION`   | `https://<domain>/cgw`          |
-| `NEXT_PUBLIC_DEFAULT_MAINNET_CHAIN_ID` | `catacomb.chains.etc.chainId`   |
-| `NEXT_PUBLIC_IS_PRODUCTION`            | `"true"`                        |
+| Env var                                | Source                                  |
+|----------------------------------------|-----------------------------------------|
+| `NEXT_PUBLIC_BRAND_NAME`               | `catacomb.branding.appName`             |
+| `NEXT_PUBLIC_GATEWAY_URL_PRODUCTION`   | `https://<domain>/cgw`                  |
+| `NEXT_PUBLIC_DEFAULT_MAINNET_CHAIN_ID` | `catacomb.chains.etc.chainId`           |
+| `NEXT_PUBLIC_IS_PRODUCTION`            | `"true"`                                |
+| `NEXT_PUBLIC_CATACOMB_TAGLINE`         | `catacomb.branding.tagline`             |
+| `NEXT_PUBLIC_CATACOMB_FOOTER_LINKS`    | `catacomb.branding.footerLinks` (JSON)  |
+| `NEXT_PUBLIC_CATACOMB_GITHUB_REPO`     | `catacomb.branding.githubRepoLink`      |
+| `NEXT_PUBLIC_CATACOMB_NOTIFICATION`    | `catacomb.branding.notification`        |
+
+The `NEXT_PUBLIC_CATACOMB_*` family is only meaningful with
+`branding.enable = true` (the patch reads them); with `enable = false`
+they're set to `""` and ignored.
 
 Any change to those values triggers a UI rebuild. ~5–10 min on a 4 vCPU
 box; downstream consumers are expected to wire up their own binary cache

@@ -126,7 +126,7 @@
       flake = {
         # Idiomatic consumption: import these in your own flake's
         # nixosConfigurations alongside `disko.nixosModules.disko`, then set
-        # `catacomb.*` options. See `local/flake.nix.example` for a worked
+        # `catacomb.*` options. See `consumer.example.nix` for a worked
         # example.
         nixosModules =
           let
