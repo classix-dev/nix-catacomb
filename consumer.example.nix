@@ -104,33 +104,42 @@
                     sshAuthorizedKeys
                     ;
 
-                  # ── Optional: branding ─────────────────────────────
+                  # ── Branding ────────────────────────────────────────
                   # Library defaults render the canonical Catacomb look
                   # (Classix-flavored: green accent, Michroma + Space
                   # Grotesk wordmark, classix.dev footer link). Override
-                  # any subset to brand your deploy.
-                  #
-                  # branding.appName        = "Acme Multi-Sig";
-                  # branding.tagline        = "operator preview";
-                  # branding.githubRepoLink = "https://github.com/<you>/<your-fork>";
-                  # branding.footerLinks    = [
-                  #   { label = "ops.acme.com"; url = "https://ops.acme.com"; }
-                  # ];
-                  # branding.theme = {
-                  #   textColor       = "#ffffff";
-                  #   backgroundColor = "#000000";
-                  # };
-                  # branding.faviconSvg = ./my-favicon.svg;
-                  #
-                  # Top-of-page modal shown once per browser session.
-                  # Empty string (default) hides it entirely. Useful for
-                  # demo / staging deploys.
-                  # branding.notification = "Demo deploy — do not use with production assets.";
-                  #
-                  # Disable the whole branding overlay (ship vanilla Safe
-                  # with only `appName` swapped via the upstream-supported
-                  # NEXT_PUBLIC_BRAND_NAME):
-                  # branding.enable = false;
+                  # any subset to brand your deploy. Drop a key entirely
+                  # to inherit the library default.
+                  branding = {
+                    appName = "Acme Multi-Sig";
+                    tagline = "operator preview";
+                    githubRepoLink = "https://github.com/your-org/your-fork";
+                    footerLinks = [
+                      {
+                        label = "ops.acme.com";
+                        url = "https://ops.acme.com";
+                      }
+                    ];
+                    theme = {
+                      textColor = "#ffffff";
+                      backgroundColor = "#000000";
+                    };
+
+                    # Top-of-page modal shown once per browser session.
+                    # Empty string (default) hides it entirely. Useful
+                    # for demo / staging deploys.
+                    notification = "Demo deploy — do not use with production assets.";
+
+                    # SVG used as the wallet's favicon. Defaults to the
+                    # library's ETC chain logo. Point at a path in your
+                    # consumer flake to override:
+                    # faviconSvg = ./my-favicon.svg;
+
+                    # Disable the whole branding overlay (ship vanilla
+                    # Safe with only `appName` swapped via the
+                    # upstream-supported NEXT_PUBLIC_BRAND_NAME):
+                    # enable = false;
+                  };
 
                   # ── Optional: chains ───────────────────────────────
                   # Library default is Ethereum Classic mainnet (61),
