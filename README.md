@@ -6,14 +6,12 @@ wallet onto a single VM, branded and configured via Nix module options.
 The default chain set is **Ethereum Classic** (61) and **Mordor testnet**
 (63), branded as *Classix Catacomb Multi-Sig*; both are overrideable.
 
-The stack is upstream `safeglobal/*` Docker images orchestrated by NixOS via
-`virtualisation.oci-containers`, deployed onto a fresh VM by
-[nixos-anywhere](https://github.com/nix-community/nixos-anywhere) with disk
-layout driven by [disko](https://github.com/nix-community/disko).
-
-> **Status — sketch.** The module structure is in place, but the host has
-> not yet been booted end-to-end. Expect rough edges around port mappings,
-> the chain-bootstrap JSON shape, and the UI branding overlay.
+The stack is upstream `safe-global/safe-infrastructure`'s docker-compose
+project run verbatim against a NixOS-managed Docker daemon, plus a
+Nix-built static UI served by the host nginx, plus an idempotent
+chain-bootstrap oneshot that seeds `safe-config-service`. Deployed onto a
+fresh VM by [nixos-anywhere](https://github.com/nix-community/nixos-anywhere)
+with disk layout driven by [disko](https://github.com/nix-community/disko).
 
 ## Layout
 
@@ -33,40 +31,34 @@ pkgs/safe-wallet-web/           Nix derivation that builds apps/web statically
 
 ## Deploying guide
 
-### 1. Fork and clone
+This repo is a *library* flake — it exposes `nixosModules.catacomb` and a
+`packages.safe-wallet-web-static` derivation, but it doesn't deploy itself.
+Wrap it in a small consumer flake that pins the library and supplies your
+domain / SSH keys / branding. A worked example lives at
+[`local/flake.nix.example`](./local/flake.nix.example), and a real one at
+[classix-dev/classix-catacomb-nix-deployment](https://github.com/classix-dev/classix-catacomb-nix-deployment).
 
-Fork this repository on GitHub, then clone your fork locally:
+### 1. Create your consumer flake
+
+Outside of this repo:
 
 ```sh
-git clone git@github.com:<you>/nix-catacomb.git
-cd nix-catacomb
-```
-
-### 2. Set your per-deploy values
-
-```sh
-cp hosts/catacomb/config.nix.example hosts/catacomb/config.nix
-$EDITOR hosts/catacomb/config.nix
+mkdir my-catacomb && cd my-catacomb
+cp /path/to/nix-catacomb/local/flake.nix.example flake.nix
+$EDITOR flake.nix      # set domain, acmeEmail, sshAuthorizedKeys, branding
+nix flake lock
 ```
 
 Required: `domain`, `acmeEmail`, `sshAuthorizedKeys`. Everything else
-inherits from `defaultConfig.nix`.
+inherits from `hosts/catacomb/defaultConfig.nix` in the library.
 
-`config.nix` is gitignored so your overrides never get pushed back. Because
-Nix flakes ignore untracked files, you need to force-stage it locally so
-flake evaluation can see it:
-
-```sh
-git add -f hosts/catacomb/config.nix     # Nix can now read it; commit guard still in place
-```
-
-### 3. Provision a VM
+### 2. Provision a VM
 
 Any provider works — minimum recommended specs are below. Provision a fresh
 host with **Ubuntu / Debian** (or anything `nixos-anywhere` can kexec from)
 and your SSH key installed for `root`. You'll need its IP address.
 
-### 4. Point DNS at the VM
+### 3. Point DNS at the VM
 
 Two records on the apex domain you set in `config.nix`:
 
@@ -78,7 +70,7 @@ Two records on the apex domain you set in `config.nix`:
 Wait for propagation before the next step — ACME will fail to issue
 certificates if the DNS records don't yet resolve to the VM.
 
-### 5. Install with `nixos-anywhere`
+### 4. Install with `nixos-anywhere`
 
 ```sh
 nix run github:nix-community/nixos-anywhere -- \
@@ -90,21 +82,25 @@ This kexecs into the NixOS installer, runs `disko` to partition the disk,
 installs the system, and reboots. First boot generates secrets to
 `/var/lib/catacomb/secrets/` and pulls all `safeglobal/*` container images.
 
-### 6. Subsequent deploys
+### 5. Subsequent deploys
 
-After editing any module or `config.nix`:
+After editing any module or your consumer flake:
 
 ```sh
 nixos-rebuild switch --flake .#catacomb --target-host root@<vm-ip>
 ```
 
-### 7. Updating
+### 6. Updating
 
 ```sh
-nix flake update                              # bump nixpkgs / disko / nixos-anywhere
-$EDITOR hosts/catacomb/safe-stack.nix         # bump pinned safeglobal/* image versions
+nix flake update                              # bump nix-catacomb (and transitively nixpkgs etc.)
 nixos-rebuild switch --flake .#catacomb --target-host root@<vm-ip>
 ```
+
+Image version pins live in the library's `hosts/catacomb/safe-stack.nix`
+(`UI_VERSION`, `CGW_VERSION`, `CFG_VERSION`, `TXS_VERSION`,
+`EVENTS_VERSION`); bump them there and submit a PR if you want them
+upstreamed.
 
 ## What gets deployed
 
@@ -125,23 +121,45 @@ mirrored into NixOS systemd units:
 (release tag `web-v1.88.0` at the time of writing) and built statically
 by `pkgs/safe-wallet-web`. The output is a directory of HTML/JS/CSS that
 the host nginx serves directly from the Nix store — no UI container, no
-runtime build.
+runtime build on the droplet.
 
-Branding is **baked at build time**:
-- **App name** (`branding.appName`) — substituted over `Safe{Wallet}` /
-  `Safe Wallet` in the source before `next build`.
-- **Gateway URL / chain id** (`domain`, `chains.etc.chainId`) — exported
-  as `NEXT_PUBLIC_*` env vars consumed by `next build`.
+Per-deploy values are baked at build time via `NEXT_PUBLIC_*` env vars,
+which Next.js inlines into the compiled bundle:
 
-Any change to those values triggers a rebuild of the UI derivation. A
-single build takes ~5–10 min on a 4 vCPU box; downstream deploy flakes
-that consume `nixosModules.catacomb` are expected to wire up their own
-binary cache (substituter + push) so that `nixos-rebuild switch` doesn't
-rebuild the bundle on every host.
+| Env var                                | Source                          |
+|----------------------------------------|---------------------------------|
+| `NEXT_PUBLIC_BRAND_NAME`               | `catacomb.branding.appName`     |
+| `NEXT_PUBLIC_GATEWAY_URL_PRODUCTION`   | `https://<domain>/cgw`          |
+| `NEXT_PUBLIC_DEFAULT_MAINNET_CHAIN_ID` | `catacomb.chains.etc.chainId`   |
+| `NEXT_PUBLIC_IS_PRODUCTION`            | `"true"`                        |
 
-**Theme colors** (`branding.theme.*`) still get POSTed per chain to
-`cfg-service` by the `catacomb-chain-bootstrap` systemd oneshot — those
-live in chain metadata, not the bundle.
+Any change to those values triggers a UI rebuild. ~5–10 min on a 4 vCPU
+box; downstream consumers are expected to wire up their own binary cache
+(substituter + push) so `nixos-rebuild switch` doesn't rebuild the
+bundle on every host.
+
+**Theme colors** (`branding.theme.*`) live in chain metadata in
+`cfg-service`, not the bundle — see Chain registration below.
+
+### Chain registration
+
+`catacomb-chain-bootstrap` is a systemd oneshot that runs after the
+compose stack comes up. It pipes a generated Python script into
+`docker exec catacomb-cfg-web-1 python manage.py shell`, creating
+two kinds of rows idempotently (`update_or_create`):
+
+- A `chains.Service` row per entry in `catacomb.services` (default
+  `[ "WALLET_WEB" ]`) — without one, cfg-service's
+  `/v2/chains/{service_key}/` returns 404 because of `get_object_or_404`,
+  and that cascades into a 404 on every CGW chain query.
+- A `chains.Chain` row per entry in `catacomb.chains` with all the
+  fields the Client Gateway's Zod schema expects, including the
+  `nativeCurrency.logoUri` string (CGW will refuse to serialize the
+  whole list if any chain has a null currency logo).
+
+The unauthenticated `POST /cfg/api/v1/chains/` endpoint is read-only —
+all earlier attempts to seed via curl 405'd silently. Going through the
+Django shell is the only path that doesn't require admin login.
 
 ## Recommended host requirements
 
@@ -172,10 +190,10 @@ nix flake check      # statix, deadnix, treefmt as flake checks
 
 ## Known gaps
 
-- `chain-bootstrap` JSON payload shape needs verification against a live
-  `safe-config-service` admin API.
-- Mordor (chain 63) `txs` instance is declared in defaults but not yet
-  wired to its own container in `safe-stack.nix`.
+- The bundled `txs` container indexes a single chain — Mordor (chain 63)
+  is registered in cfg-service for visibility but Safe interactions on
+  it will fail until a separate txs container is wired in
+  `safe-stack.nix`.
 - The UI build skips `yarn fetch-chains` (network-dependent); the app
   falls back to a runtime CGW request, costing one extra round-trip
   before first paint.
