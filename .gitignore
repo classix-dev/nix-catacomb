@@ -1,0 +1,4 @@
+.devcontainer/
+result
+result-*
+.direnv/
