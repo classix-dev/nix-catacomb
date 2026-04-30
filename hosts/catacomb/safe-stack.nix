@@ -77,15 +77,24 @@ let
         environment:
           AUTH_TOKEN: "''${CGW_AUTH_TOKEN}"
           AUTH_POST_LOGIN_REDIRECT_URI: "https://${cfg.domain}/"
+          POSTGRES_PASSWORD: "''${POSTGRES_PASSWORD}"
 
       ui:
         environment:
           NEXT_PUBLIC_GATEWAY_URL_PRODUCTION: "https://${cfg.domain}/cgw"
           NEXT_PUBLIC_DEFAULT_MAINNET_CHAIN_ID: "${toString cfg.chains.etc.chainId}"
           NEXT_PUBLIC_IS_PRODUCTION: "true"
-          # The image does a Next.js build at container-start to bake runtime
-          # env vars in; Node's default 2 GB heap OOMs under it. Allow 6 GB.
-          NODE_OPTIONS: "--max-old-space-size=6144"
+          # The image runs `next build` at container-start to bake runtime
+          # env vars in. Default 2 GB heap OOMs; 6 GB exceeds available
+          # alongside other containers. 3 GB fits the ~3 GB headroom.
+          NODE_OPTIONS: "--max-old-space-size=3072"
+        volumes:
+          # Persist the Next.js build cache so subsequent restarts skip the
+          # ~10-min rebuild. First boot still pays the build cost.
+          - ui-next-cache:/app/apps/web/.next
+
+volumes:
+  ui-next-cache: {}
   '';
 
   # docker compose invocation used by every catacomb-stack systemd unit.
