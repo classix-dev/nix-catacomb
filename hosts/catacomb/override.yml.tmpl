@@ -77,6 +77,13 @@ services:
       AUTH_TOKEN: "${CGW_AUTH_TOKEN}"
       AUTH_POST_LOGIN_REDIRECT_URI: "https://@CATACOMB_DOMAIN@/"
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
+      # CGW prices / positions provider tuning — see catacomb.cgw.* options.
+      # Empty string = "not set" → CGW falls back to its own default.
+      PRICES_PROVIDER_API_KEY: "${PRICES_PROVIDER_API_KEY}"
+      PRICES_PROVIDER_API_BASE_URI: "${PRICES_PROVIDER_API_BASE_URI}"
+      PRICES_TTL_SECONDS: "${PRICES_TTL_SECONDS}"
+      NATIVE_COINS_PRICES_TTL_SECONDS: "${NATIVE_COINS_PRICES_TTL_SECONDS}"
+      ZERION_API_KEY: "${ZERION_API_KEY}"
 
   # The upstream UI is replaced by a Nix-built static export served from
   # the host nginx (see hosts/catacomb/ui.nix). The `ui:` service is kept

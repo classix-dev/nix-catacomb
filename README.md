@@ -207,6 +207,51 @@ The unauthenticated `POST /cfg/api/v1/chains/` endpoint is read-only —
 all earlier attempts to seed via curl 405'd silently. Going through the
 Django shell is the only path that doesn't require admin login.
 
+### Client Gateway tuning (`catacomb.cgw`)
+
+CGW is the data plane the wallet UI hits for everything fiat-denominated
+(token prices, native-coin price, DeFi positions). The defaults
+upstream ships are tuned for paid-tier provider keys; on a small
+self-hosted Catacomb without keys, two symptoms show up on the Balances
+page:
+
+1. **`fiatBalance: 0` "for ages, then updates"** — CGW caches prices
+   in Redis, but with a short TTL (~100s for native coin upstream).
+   When the cache expires, CGW hits the unauthenticated Coingecko
+   public API (~10 req/min limit), gets rate-limited, and **does not
+   negative-cache the failure** — so every concurrent miss re-hits
+   Coingecko until one slips through. The page renders $0 until
+   that happens, then suddenly works for the cache-TTL window, then
+   $0 again.
+2. **`{"code":401,"message":"An error occurred"}` on `/positions/usd`** —
+   CGW's positions endpoint is hardcoded to Zerion; without a Zerion
+   API key, Zerion 401s and CGW propagates that to the browser. (Zerion
+   doesn't cover ETC anyway, so a key won't actually populate
+   positions on ETC-only deploys — it just stops the 401 noise.)
+
+Both are addressed via `catacomb.cgw.*`:
+
+| Option                                            | Default | Maps to CGW env                  |
+|---------------------------------------------------|---------|----------------------------------|
+| `cgw.pricesProvider.apiKey`                       | `null`  | `PRICES_PROVIDER_API_KEY`        |
+| `cgw.pricesProvider.apiBaseUri`                   | `null`  | `PRICES_PROVIDER_API_BASE_URI`   |
+| `cgw.pricesProvider.tokenPricesTtlSeconds`        | `3600`  | `PRICES_TTL_SECONDS`             |
+| `cgw.pricesProvider.nativeCoinPricesTtlSeconds`   | `3600`  | `NATIVE_COINS_PRICES_TTL_SECONDS`|
+| `cgw.zerion.apiKey`                               | `null`  | `ZERION_API_KEY`                 |
+
+The 1h TTL defaults are the cheap fix for symptom (1) — one upstream
+request per chain per hour fits comfortably under any provider's free
+tier, and stale-by-up-to-an-hour fiat is fine for a wallet display.
+Add a Coingecko Demo key (free, ~10k calls/month) for tighter freshness;
+add `apiBaseUri = "https://pro-api.coingecko.com/api/v3"` alongside
+the key if you upgrade to Pro.
+
+> **Secrets caveat:** `apiKey` values are interpolated into systemd
+> activation scripts and end up in `/nix/store`, which is
+> world-readable on the host. Use `builtins.readFile` against a path
+> outside the flake tree, or wrap with agenix/sops, for any key worth
+> protecting.
+
 ## Recommended host requirements
 
 Single-VM deploy, indexing one or two small EVM chains:

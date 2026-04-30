@@ -161,6 +161,90 @@
       };
     };
 
+    # ── Client Gateway (CGW) tuning ─────────────────────────────────────
+    # Expose the upstream `safe-client-gateway` env vars that govern
+    # price-cache TTLs and external-provider auth. The prices module
+    # uses Coingecko by default; without an API key it hits the
+    # unauthenticated public API (single-digit-rps rate limit), which
+    # on a small deploy with a short cache produces the classic
+    # "balances show $0 then update later" symptom — the cache TTL
+    # window is shorter than the time it takes for one request to
+    # win the rate-limit lottery.
+    #
+    # Defaults below set price TTLs to 1h. Empirically, one upstream
+    # request per hour fits comfortably under any provider's free tier,
+    # while a stale-by-up-to-an-hour fiat conversion is fine for a
+    # wallet UI. Tighten if you need fresher prices and you have a
+    # paid tier; ttl is independent of the API-key choice.
+    cgw = {
+      pricesProvider = {
+        apiKey = mkOption {
+          type = types.nullOr types.str;
+          default = null;
+          example = "CG-xxxxxxxxxxxxxxxx";
+          description = ''
+            Coingecko API key (Demo or Pro). null = unauthenticated
+            public API. The unauthenticated API rate-limits aggressively
+            (~10 req/min) — fine when paired with a long
+            `tokenPricesTtlSeconds` / `nativeCoinPricesTtlSeconds`,
+            painful with the upstream defaults.
+
+            Heads up: the value is interpolated into a systemd
+            activation script and ends up in /nix/store, which is
+            world-readable on the host. For a real key, prefer
+            `builtins.readFile "/path/to/key-outside-flake-tree";`
+            or wrap with agenix/sops.
+          '';
+        };
+        apiBaseUri = mkOption {
+          type = types.nullOr types.str;
+          default = null;
+          example = "https://pro-api.coingecko.com/api/v3";
+          description = ''
+            Override the prices-provider base URI. Required when
+            `apiKey` is a Pro key — Coingecko's Pro API uses
+            `pro-api.coingecko.com`, not the public `api.coingecko.com`.
+            null = upstream default.
+          '';
+        };
+        tokenPricesTtlSeconds = mkOption {
+          type = types.ints.positive;
+          default = 3600;
+          description = ''
+            CGW Redis cache TTL for ERC-20 token prices, in seconds.
+            Sets `PRICES_TTL_SECONDS` on `cgw-web`. Upstream default
+            is 300; we default to 3600 (1h).
+          '';
+        };
+        nativeCoinPricesTtlSeconds = mkOption {
+          type = types.ints.positive;
+          default = 3600;
+          description = ''
+            CGW Redis cache TTL for the native-coin price (e.g. ETC,
+            ETH), in seconds. Sets `NATIVE_COINS_PRICES_TTL_SECONDS`.
+            Upstream default is 100; we default to 3600 (1h).
+          '';
+        };
+      };
+      zerion = {
+        apiKey = mkOption {
+          type = types.nullOr types.str;
+          default = null;
+          description = ''
+            Zerion API key for the `/v1/.../positions/<fiat>`
+            DeFi-positions endpoint. Without one, Zerion 401s and CGW
+            propagates that to the browser; the wallet's Balances
+            page surfaces `{"code":401,"message":"An error occurred"}`
+            in the network tab. Note Zerion does not currently cover
+            Ethereum Classic, so a key here doesn't actually populate
+            positions on ETC-only deploys — it only stops the 401
+            noise. Same /nix/store leakage caveat as
+            `pricesProvider.apiKey`.
+          '';
+        };
+      };
+    };
+
     # ── cfg-service service keys (Service.key in chains_service) ────────
     # The frontend (safe-wallet-web) issues `/v2/chains?serviceKey=WALLET_WEB`.
     # cfg-service `get_object_or_404(Service, key=service_key)` returns 404
