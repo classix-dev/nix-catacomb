@@ -35,8 +35,9 @@ This repo is a *library* flake — it exposes `nixosModules.catacomb` and a
 `packages.safe-wallet-web-static` derivation, but it doesn't deploy itself.
 Wrap it in a small consumer flake that pins the library and supplies your
 domain / SSH keys / branding. A worked example lives at
-[`local/flake.nix.example`](./local/flake.nix.example), and a real one at
-[classix-dev/classix-catacomb-nix-deployment](https://github.com/classix-dev/classix-catacomb-nix-deployment).
+[`local/flake.nix.example`](./local/flake.nix.example).
+<!-- TODO: link to a public sample deployment flake once one is published. -->
+
 
 ### 1. Create your consumer flake
 
