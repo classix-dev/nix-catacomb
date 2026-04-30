@@ -39,6 +39,12 @@ let
       txs-db:        { environment: { POSTGRES_PASSWORD: "''${POSTGRES_PASSWORD}" } }
       events-db:     { environment: { POSTGRES_PASSWORD: "''${POSTGRES_PASSWORD}" } }
 
+      # RabbitMQ 4.x disables `transient_nonexcl_queues` which Celery's
+      # default queue declaration relies on. Pin to 3.13 until upstream
+      # safe-transaction-service updates Celery / queue declarations.
+      txs-rabbitmq:     { image: "rabbitmq:3.13-alpine" }
+      general-rabbitmq: { image: "rabbitmq:3.13-alpine" }
+
       cfg-web:
         environment:
           SECRET_KEY: "''${DJANGO_SECRET}"
