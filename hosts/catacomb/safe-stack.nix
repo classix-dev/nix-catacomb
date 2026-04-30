@@ -76,6 +76,7 @@ let
       cgw-web:
         environment:
           AUTH_TOKEN: "''${CGW_AUTH_TOKEN}"
+          AUTH_POST_LOGIN_REDIRECT_URI: "https://${cfg.domain}/"
 
       ui:
         environment:
