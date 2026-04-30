@@ -16,15 +16,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # GH-hosted runners ship with ~7 GB RAM and no swap. `next build`'s
-      # prerender phase peaks past 5 GB of heap; without swap the kernel
+      # GH-hosted runners ship with ~7 GB RAM and a pre-existing
+      # `/swapfile` we can't touch ("Text file busy"). Add our own on
+      # the larger `/mnt` partition. `next build`'s prerender phase
+      # peaks past 5 GB of heap; without extra swap the kernel
       # OOM-kills it before the bundle is generated.
       - name: Add 8 GB swap
         run: |
-          sudo fallocate -l 8G /swapfile
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
+          sudo fallocate -l 8G /mnt/swapfile
+          sudo chmod 600 /mnt/swapfile
+          sudo mkswap /mnt/swapfile
+          sudo swapon /mnt/swapfile
           free -h
 
       - uses: cachix/install-nix-action@v31
