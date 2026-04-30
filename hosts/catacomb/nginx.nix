@@ -1,32 +1,31 @@
 # Reverse proxy + TLS for Catacomb.
 #
-# Subdomain layout:
-#   multisig.<domain>            → ui (frontend)
-#   client.multisig.<domain>     → cgw-web (client gateway)
-#   transaction-classic.<domain> → txs-web (mainnet)
-#   transaction-mordor.<domain>  → txs-web (mordor) — TODO when 2nd txs is wired
+# Layout (with `catacomb.domain` = catacomb.classix.dev):
+#   catacomb.classix.dev                     → ui (frontend)
+#   client.catacomb.classix.dev              → cgw-web (client gateway)
+#   transaction-classic.catacomb.classix.dev → txs-web (mainnet)
+#   transaction-mordor.catacomb.classix.dev  → txs-web (mordor) — TODO
 #
 # The UI vhost runs `sub_filter` to swap upstream Safe branding strings
-# (e.g. "Safe{Wallet}") for `catacomb.branding.appName` in HTML responses.
-# This is a deliberate stop-gap — proper override is a UI rebuild from
-# `safe-wallet-monorepo` (TODO).
+# (e.g. "Safe{Wallet}") for `catacomb.branding.appName` in HTML / JS
+# responses. Stop-gap until a proper UI rebuild lands.
 { config, lib, ... }:
 let
-  domain = "catacomb.example"; # TODO: lift to a top-level option
-  acmeEmail = "ops@example.invalid";
-  appName = config.catacomb.branding.appName;
+  d = config.catacomb.domain;
+  inherit (config.catacomb.branding) appName;
+  tls = config.catacomb.tlsEnabled;
 
-  proxyTo = upstream: extras: lib.recursiveUpdate {
-    forceSSL = true;
-    enableACME = true;
-    locations."/" = {
-      proxyPass = "http://${upstream}";
-      proxyWebsockets = true;
-    };
-  } extras;
+  proxyTo =
+    upstream: extras:
+    lib.recursiveUpdate {
+      forceSSL = tls;
+      enableACME = tls;
+      locations."/" = {
+        proxyPass = "http://${upstream}";
+        proxyWebsockets = true;
+      };
+    } extras;
 
-  # sub_filter doesn't run on gzipped responses — strip Accept-Encoding
-  # upstream and apply substitutions on the decoded body.
   uiBrandingExtras = {
     locations."/" = {
       extraConfig = ''
@@ -40,9 +39,9 @@ let
   };
 in
 {
-  security.acme = {
+  security.acme = lib.mkIf tls {
     acceptTerms = true;
-    defaults.email = acmeEmail;
+    defaults.email = config.catacomb.acmeEmail;
   };
 
   services.nginx = {
@@ -52,13 +51,10 @@ in
     recommendedGzipSettings = true;
 
     virtualHosts = {
-      "multisig.${domain}" = proxyTo "127.0.0.1:8080" uiBrandingExtras;
-      "client.multisig.${domain}" = proxyTo "127.0.0.1:3000" { };
-      "transaction-classic.${domain}" = proxyTo "127.0.0.1:8000" { };
-      # "transaction-mordor.${domain}" = proxyTo "127.0.0.1:8001" { }; # TODO
+      "${d}" = proxyTo "127.0.0.1:8080" uiBrandingExtras;
+      "client.${d}" = proxyTo "127.0.0.1:3000" { };
+      "transaction-classic.${d}" = proxyTo "127.0.0.1:8000" { };
+      # "transaction-mordor.${d}" = proxyTo "127.0.0.1:8001" { }; # TODO
     };
   };
-
-  # Container port mappings must match these upstream addresses — TODO: add
-  # explicit `ports = [ "127.0.0.1:8080:8080" ]` style entries to safe-stack.nix.
 }

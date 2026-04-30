@@ -1,4 +1,9 @@
 .devcontainer/
+.claude/
 result
 result-*
 .direnv/
+
+# Per-deploy consumer flake — never commit
+local/flake.nix
+local/flake.lock

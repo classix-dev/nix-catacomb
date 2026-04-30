@@ -1,17 +1,19 @@
 # nix-catacomb
 
 Nix flake that deploys a self-hosted [Safe](https://safe.global) multi-sig
-wallet for **Ethereum Classic** (chains 61 + 63), branded as
-**Classix Catacomb Multi-Sig**.
+wallet onto a single VM, branded and configured via Nix module options.
+
+The default chain set is **Ethereum Classic** (61) and **Mordor testnet**
+(63), branded as *Classix Catacomb Multi-Sig*; both are overrideable.
 
 The stack is upstream `safeglobal/*` Docker images orchestrated by NixOS via
 `virtualisation.oci-containers`, deployed onto a fresh VM by
 [nixos-anywhere](https://github.com/nix-community/nixos-anywhere) with disk
 layout driven by [disko](https://github.com/nix-community/disko).
 
-> **Status — sketch.** Module structure is in place, but the host has not yet
-> been booted end-to-end. Image versions, port mappings, secrets, and the
-> chain-bootstrap JSON shape need verification on a real deploy.
+> **Status — sketch.** The module structure is in place, but the host has
+> not yet been booted end-to-end. Expect rough edges around port mappings,
+> the chain-bootstrap JSON shape, and the UI branding overlay.
 
 ## Layout
 
@@ -19,90 +21,128 @@ layout driven by [disko](https://github.com/nix-community/disko).
 flake.nix                       inputs, devShell, nixosConfigurations.catacomb
 hosts/catacomb/
   configuration.nix             base NixOS (boot, ssh, podman, firewall)
-  disko.nix                     single-disk BIOS layout for /dev/vda
-  branding.nix                  catacomb.{branding,chains.*} options
-  safe-stack.nix                17 OCI containers + chain-bootstrap oneshot
+  options.nix                   declares every catacomb.* option
+  defaultConfig.nix             defaults for every option (one obvious place)
+  config.nix.example            template for per-deploy overrides
+  config.nix                    YOUR per-deploy overrides (gitignored)
+  disko.nix                     single-disk BIOS layout
+  safe-stack.nix                17 OCI containers, secrets, chain-bootstrap
   nginx.nix                     reverse proxy, ACME TLS, sub_filter branding
 ```
 
-## One-line install
+## Deploying guide
 
-Once a VM exists with SSH reachable as `root@<ip>`:
+### 1. Fork and clone
+
+Fork this repository on GitHub, then clone your fork locally:
+
+```sh
+git clone git@github.com:<you>/nix-catacomb.git
+cd nix-catacomb
+```
+
+### 2. Set your per-deploy values
+
+```sh
+cp hosts/catacomb/config.nix.example hosts/catacomb/config.nix
+$EDITOR hosts/catacomb/config.nix
+```
+
+Required: `domain`, `acmeEmail`, `sshAuthorizedKeys`. Everything else
+inherits from `defaultConfig.nix`.
+
+`config.nix` is gitignored so your overrides never get pushed back. Because
+Nix flakes ignore untracked files, you need to force-stage it locally so
+flake evaluation can see it:
+
+```sh
+git add -f hosts/catacomb/config.nix     # Nix can now read it; commit guard still in place
+```
+
+### 3. Provision a VM
+
+Any provider works — minimum recommended specs are below. Provision a fresh
+host with **Ubuntu / Debian** (or anything `nixos-anywhere` can kexec from)
+and your SSH key installed for `root`. You'll need its IP address.
+
+### 4. Point DNS at the VM
+
+Two records on the apex domain you set in `config.nix`:
+
+| Record                   | Type | Value          |
+|--------------------------|------|----------------|
+| `<your-domain>`          | A    | `<vm-ip>`      |
+| `*.<your-domain>`        | A    | `<vm-ip>`      |
+
+Wait for propagation before the next step — ACME will fail to issue
+certificates if the DNS records don't yet resolve to the VM.
+
+### 5. Install with `nixos-anywhere`
 
 ```sh
 nix run github:nix-community/nixos-anywhere -- \
-  --flake github:classix-dev/nix-catacomb#catacomb \
-  --target-host root@<ip>
+  --flake .#catacomb \
+  --target-host root@<vm-ip>
 ```
 
-Re-running deploys (after editing the flake locally):
+This kexecs into the NixOS installer, runs `disko` to partition the disk,
+installs the system, and reboots. First boot generates secrets to
+`/var/lib/catacomb/secrets/` and pulls all `safeglobal/*` container images.
+
+### 6. Subsequent deploys
+
+After editing any module or `config.nix`:
 
 ```sh
-nixos-rebuild switch \
-  --flake .#catacomb \
-  --target-host root@<ip>
+nixos-rebuild switch --flake .#catacomb --target-host root@<vm-ip>
+```
+
+### 7. Updating
+
+```sh
+nix flake update                              # bump nixpkgs / disko / nixos-anywhere
+$EDITOR hosts/catacomb/safe-stack.nix         # bump pinned safeglobal/* image versions
+nixos-rebuild switch --flake .#catacomb --target-host root@<vm-ip>
 ```
 
 ## What gets deployed
 
-Per `safe-global/safe-infrastructure`, mirrored into NixOS systemd units:
+Per [`safe-global/safe-infrastructure`](https://github.com/safe-global/safe-infrastructure),
+mirrored into NixOS systemd units:
 
 | Tier         | Containers                                                                 |
 |--------------|----------------------------------------------------------------------------|
-| Frontend     | `ui` (safe-wallet-web), `nginx` (TLS + branding sub_filter)                |
-| Gateway      | `cgw-web` (client-gateway-nest), `cgw-redis`, `cgw-db`                      |
-| Config       | `cfg-web` (config-service), `cfg-db`                                        |
-| Transactions | `txs-web`, `txs-worker-{indexer,contracts-tokens,notifications-webhooks}`, `txs-scheduler`, `txs-db`, `txs-redis`, `txs-rabbitmq` |
-| Events       | `events-web`, `events-db`, `general-rabbitmq`                               |
+| Frontend     | `ui` ([safe-wallet-monorepo](https://github.com/safe-global/safe-wallet-monorepo)), `nginx` |
+| Gateway      | `cgw-web` ([safe-client-gateway](https://github.com/safe-global/safe-client-gateway)), `cgw-redis`, `cgw-db` |
+| Config       | `cfg-web` ([safe-config-service](https://github.com/safe-global/safe-config-service)), `cfg-db` |
+| Transactions | `txs-web` ([safe-transaction-service](https://github.com/safe-global/safe-transaction-service)), 3× workers, scheduler, `txs-db`, `txs-redis`, `txs-rabbitmq` |
+| Events       | `events-web`, `events-db`, `general-rabbitmq`                              |
 
-## Branding
+Branding lands in two ways:
+- **Theme colors** (`branding.theme.*`) → POSTed per chain to `cfg-service`
+  by the `catacomb-chain-bootstrap` systemd oneshot. No image rebuild.
+- **App name** (`branding.appName`) → swapped into HTML/JS responses by an
+  nginx `sub_filter` rule on the UI vhost. Stop-gap; a proper UI rebuild
+  from the monorepo is a follow-up.
 
-Defined in `hosts/catacomb/branding.nix`:
+## Recommended host requirements
 
-```nix
-catacomb.branding.appName       = "Classix Catacomb Multi-Sig";
-catacomb.branding.theme = {
-  textColor       = "#ddffdc";   # classix.dev pale green
-  backgroundColor = "#0a0a0a";   # near-black
-};
-```
+Single-VM deploy, indexing one or two small EVM chains:
 
-How these land in the running app:
+| Resource | Minimum            | Recommended         |
+|----------|--------------------|---------------------|
+| vCPU     | 4                  | 4–8                 |
+| RAM      | 8 GB               | 16 GB               |
+| Disk     | 80 GB SSD          | 160 GB+ SSD         |
 
-- **Theme colors** — POSTed into `safe-config-service` per chain by the
-  `catacomb-chain-bootstrap` systemd oneshot. The Safe UI reads them at
-  runtime from the gateway. No image rebuild needed.
-- **App name** — replaced in HTML responses by an nginx `sub_filter` rule
-  on the UI vhost. Stop-gap only; a proper UI rebuild from
-  `safe-wallet-monorepo` is a follow-up.
+Initial chain index is dominated by RPC throughput. With a fast/local RPC,
+expect a small chain to fully index in ~12–36h. Postgres footprint is
+governed by Safe density on the chain, not raw chain size — typically
+under 10 GB for a small chain like ETC.
 
-## Chains
-
-Both chains ship registered in `branding.nix`:
-
-| Chain | ID | Short | RPC                                       |
-|-------|----|-------|-------------------------------------------|
-| Ethereum Classic | 61 | etc  | `rpc.mainnet.etccooperative.org` |
-| Mordor (testnet) | 63 | etcm | `rpc.mordor.etccooperative.org`  |
-
-RPCs and the existing on-chain Safe contract addresses are reused from the
-public ETC Cooperative deployment for v1.
-
-## Sizing
-
-DigitalOcean droplet, single-VM:
-
-- Target: **$45/mo tier** (DO Basic 8 GB / 4 vCPU AMD Premium, $48/mo).
-- Storage: 200 GB block volume for Postgres data (~$20/mo).
-- Initial chain index over a fast RPC: ~12–36 h.
-
-## Update path
-
-```sh
-# bump pinned image versions in hosts/catacomb/safe-stack.nix
-nix flake update           # bump nixpkgs / disko / nixos-anywhere
-nixos-rebuild switch --flake .#catacomb --target-host root@<ip>
-```
+Authoritative sizing notes: see [`safe-infrastructure`'s production
+docs](https://github.com/safe-global/safe-infrastructure/blob/main/docs/running_production.md)
+and the [Safe self-hosting deployment guide](https://docs.safe.global/core-api/safe-infrastructure-deployment).
 
 ## Dev shell
 
@@ -112,18 +152,22 @@ nix fmt              # treefmt: nixfmt + statix --fix + deadnix --edit
 nix flake check      # statix, deadnix, treefmt as flake checks
 ```
 
-## Known gaps before this is deployable
+## Known gaps
 
-- Container `ports` / explicit network are not declared in `safe-stack.nix`
-  — nginx won't reach the upstream addresses until they are.
-- Secrets in `safe-stack.nix` are hard-coded placeholders. Move to
-  [sops-nix](https://github.com/Mic92/sops-nix) or
-  [agenix](https://github.com/ryantm/agenix) before any real deploy.
-- Domain name is hard-coded to `catacomb.example` — lift to a flake-level
-  option.
-- ACME requires DNS records pointing at the droplet IP before the first
-  rebuild, otherwise certificate issuance fails.
+- App-name override is HTML-substitution only; replace with a UI rebuild
+  from `safe-wallet-monorepo` for a real fix.
 - `chain-bootstrap` JSON payload shape needs verification against a live
   `safe-config-service` admin API.
-- App-name override is HTML-substitution only; a real UI rebuild from
-  `safe-wallet-monorepo` is the proper fix.
+- Mordor (chain 63) `txs` instance is declared in defaults but not yet
+  wired to its own container in `safe-stack.nix`.
+- Secrets are auto-generated on first boot to `/var/lib/catacomb/secrets/`.
+  For multi-operator deploys, swap to
+  [sops-nix](https://github.com/Mic92/sops-nix) or
+  [agenix](https://github.com/ryantm/agenix).
+
+## Links
+
+- Safe core: https://github.com/safe-global
+- Self-host orchestration (docker-compose reference): https://github.com/safe-global/safe-infrastructure
+- Safe Wallet monorepo (UI source): https://github.com/safe-global/safe-wallet-monorepo
+- Safe core API docs: https://docs.safe.global/core-api

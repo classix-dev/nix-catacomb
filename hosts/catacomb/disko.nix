@@ -1,8 +1,10 @@
-# Single-disk BIOS layout for a DigitalOcean droplet (`/dev/vda`).
+# Single-disk BIOS layout. Disk path comes from `catacomb.bootDevice`
+# (default `/dev/vda` — fits most cloud VMs).
+{ config, ... }:
 {
   disko.devices.disk.main = {
     type = "disk";
-    device = "/dev/vda";
+    device = config.catacomb.bootDevice;
     content = {
       type = "gpt";
       partitions = {

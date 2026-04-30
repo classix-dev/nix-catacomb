@@ -1,0 +1,63 @@
+# Per-deploy consumer flake — copy to `local/flake.nix` (gitignored) and edit.
+#
+#   cp local/flake.nix.example local/flake.nix
+#   $EDITOR local/flake.nix
+#   cd local && nix flake lock                  # generates local/flake.lock
+#
+# Then deploy with:
+#
+#   nix run github:nix-community/nixos-anywhere -- \
+#     --flake ./local#catacomb \
+#     --target-host root@<vm-ip>
+#
+# This pattern keeps your domain, SSH keys, and branding out of the public
+# repo. The library flake (this repo) exposes `nixosModules.catacomb`; you
+# layer your overrides on top.
+{
+  description = "My Catacomb deploy";
+
+  inputs = {
+    nix-catacomb.url = "path:..";
+    nixpkgs.follows = "nix-catacomb/nixpkgs";
+    disko.follows = "nix-catacomb/disko";
+  };
+
+  outputs =
+    {
+      nixpkgs,
+      disko,
+      nix-catacomb,
+      ...
+    }:
+    {
+      nixosConfigurations.catacomb = nixpkgs.lib.nixosSystem {
+        system = "x86_64-linux";
+        modules = [
+          disko.nixosModules.disko
+          nix-catacomb.nixosModules.catacomb
+          (
+            { ... }:
+            {
+              catacomb = {
+                domain = "catacomb.example.com";
+                acmeEmail = "ops@example.com";
+                timeZone = "Europe/Berlin";
+
+                sshAuthorizedKeys = [
+                  "ssh-ed25519 AAAA... operator@laptop"
+                ];
+
+                branding = {
+                  appName = "Acme Multi-Sig";
+                  theme = {
+                    textColor = "#ffffff";
+                    backgroundColor = "#000000";
+                  };
+                };
+              };
+            }
+          )
+        ];
+      };
+    };
+}

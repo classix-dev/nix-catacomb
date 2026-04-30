@@ -32,7 +32,12 @@
       imports = [ inputs.treefmt-nix.flakeModule ];
 
       perSystem =
-        { config, pkgs, ... }:
+        {
+          config,
+          lib,
+          pkgs,
+          ...
+        }:
         {
           treefmt = {
             projectRootFile = "flake.nix";
@@ -76,16 +81,35 @@
               deadnix
             ];
           };
+
+          # `nix run .#lint` — runs the same toolchain as `nix fmt` but in
+          # CI / fail-on-change mode. Equivalent to `nix flake check` for
+          # this repo's purposes; useful as a single-command pre-push gate.
+          # NOTE: treefmt does write fixes to disk in this mode (the
+          # convention for treefmt-managed projects); commit them or revert.
+          apps.lint = {
+            type = "app";
+            program = lib.getExe (
+              pkgs.writeShellApplication {
+                name = "lint";
+                text = ''
+                  set -eu
+                  ${lib.getExe config.treefmt.build.wrapper} --fail-on-change
+                  echo "✓ lint passed"
+                '';
+              }
+            );
+          };
         };
 
       flake = {
-        nixosConfigurations.catacomb = inputs.nixpkgs.lib.nixosSystem {
-          system = "x86_64-linux";
-          specialArgs = { inherit inputs; };
-          modules = [
-            inputs.disko.nixosModules.disko
-            ./hosts/catacomb/configuration.nix
-          ];
+        # Idiomatic consumption: import these in your own flake's
+        # nixosConfigurations alongside `disko.nixosModules.disko`, then set
+        # `catacomb.*` options. See `local/flake.nix.example` for a worked
+        # example.
+        nixosModules = {
+          catacomb = ./hosts/catacomb;
+          default = ./hosts/catacomb;
         };
       };
     };
