@@ -54,6 +54,8 @@ let
   ];
 
   versionEnvLines = lib.concatStringsSep "\n" (lib.mapAttrsToList (k: v: "${k}=${v}") versions);
+
+  emptyIfNull = v: if v == null then "" else v;
 in
 {
   systemd.tmpfiles.rules = [
@@ -120,6 +122,11 @@ in
         CGW_AUTH_TOKEN=$CGW_AUTH_TOKEN
         POSTGRES_PASSWORD=$POSTGRES_PASSWORD
         DJANGO_SUPERUSER_PASSWORD=$DJANGO_SUPERUSER_PASSWORD
+        PRICES_PROVIDER_API_KEY=${emptyIfNull cfg.cgw.pricesProvider.apiKey}
+        PRICES_PROVIDER_API_BASE_URI=${emptyIfNull cfg.cgw.pricesProvider.apiBaseUri}
+        PRICES_TTL_SECONDS=${toString cfg.cgw.pricesProvider.tokenPricesTtlSeconds}
+        NATIVE_COINS_PRICES_TTL_SECONDS=${toString cfg.cgw.pricesProvider.nativeCoinPricesTtlSeconds}
+        ZERION_API_KEY=${emptyIfNull cfg.cgw.zerion.apiKey}
         EOF
         chmod 600 ${envFile}
 

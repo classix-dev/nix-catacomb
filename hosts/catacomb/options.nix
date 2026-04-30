@@ -161,6 +161,41 @@
       };
     };
 
+    # ── Client Gateway (CGW) tuning ─────────────────────────────────────
+    cgw = {
+      pricesProvider = {
+        apiKey = mkOption {
+          type = types.nullOr types.str;
+          default = null;
+          example = "CG-xxxxxxxxxxxxxxxx";
+          description = "Coingecko API key. Sets `PRICES_PROVIDER_API_KEY`.";
+        };
+        apiBaseUri = mkOption {
+          type = types.nullOr types.str;
+          default = null;
+          example = "https://pro-api.coingecko.com/api/v3";
+          description = "Override the prices-provider base URI (Pro API uses a different host). Sets `PRICES_PROVIDER_API_BASE_URI`.";
+        };
+        tokenPricesTtlSeconds = mkOption {
+          type = types.ints.positive;
+          default = 3600;
+          description = "ERC-20 token price cache TTL (seconds). Sets `PRICES_TTL_SECONDS`. Upstream default 300.";
+        };
+        nativeCoinPricesTtlSeconds = mkOption {
+          type = types.ints.positive;
+          default = 3600;
+          description = "Native-coin price cache TTL (seconds). Sets `NATIVE_COINS_PRICES_TTL_SECONDS`. Upstream default 100.";
+        };
+      };
+      zerion = {
+        apiKey = mkOption {
+          type = types.nullOr types.str;
+          default = null;
+          description = "Zerion API key for `/v1/.../positions/<fiat>`. Sets `ZERION_API_KEY`.";
+        };
+      };
+    };
+
     # ── cfg-service service keys (Service.key in chains_service) ────────
     # The frontend (safe-wallet-web) issues `/v2/chains?serviceKey=WALLET_WEB`.
     # cfg-service `get_object_or_404(Service, key=service_key)` returns 404

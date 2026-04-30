@@ -207,6 +207,20 @@ The unauthenticated `POST /cfg/api/v1/chains/` endpoint is read-only —
 all earlier attempts to seed via curl 405'd silently. Going through the
 Django shell is the only path that doesn't require admin login.
 
+### Client Gateway tuning (`catacomb.cgw`)
+
+| Option                                          | Default | Maps to CGW env                   |
+|-------------------------------------------------|---------|-----------------------------------|
+| `cgw.pricesProvider.apiKey`                     | `null`  | `PRICES_PROVIDER_API_KEY`         |
+| `cgw.pricesProvider.apiBaseUri`                 | `null`  | `PRICES_PROVIDER_API_BASE_URI`    |
+| `cgw.pricesProvider.tokenPricesTtlSeconds`      | `3600`  | `PRICES_TTL_SECONDS`              |
+| `cgw.pricesProvider.nativeCoinPricesTtlSeconds` | `3600`  | `NATIVE_COINS_PRICES_TTL_SECONDS` |
+| `cgw.zerion.apiKey`                             | `null`  | `ZERION_API_KEY`                  |
+
+`apiKey` values are interpolated into a systemd activation script and
+end up in `/nix/store` (world-readable). Use `builtins.readFile` or
+agenix/sops for real keys.
+
 ## Recommended host requirements
 
 Single-VM deploy, indexing one or two small EVM chains:
