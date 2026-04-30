@@ -73,6 +73,24 @@
       };
     };
 
+    # ── cfg-service service keys (Service.key in chains_service) ────────
+    # The frontend (safe-wallet-web) issues `/v2/chains?serviceKey=WALLET_WEB`.
+    # cfg-service `get_object_or_404(Service, key=service_key)` returns 404
+    # if no matching Service row exists — every chain query falls over.
+    # Listed keys are seeded by `catacomb-chain-bootstrap` on each rebuild.
+    services = mkOption {
+      type = types.listOf types.str;
+      example = [
+        "WALLET_WEB"
+        "MOBILE"
+      ];
+      description = ''
+        Service keys to register in cfg-service so that the
+        `/v2/chains/{service_key}/` endpoint resolves. Defaults to
+        `[ "WALLET_WEB" ]` — the only key safe-wallet-web sends.
+      '';
+    };
+
     # ── Chains (registered in safe-config-service at first boot) ─────────
     chains = mkOption {
       type = types.attrsOf (
@@ -81,6 +99,18 @@
             chainId = mkOption { type = types.int; };
             shortName = mkOption { type = types.str; };
             chainName = mkOption { type = types.str; };
+            description = mkOption {
+              type = types.str;
+              default = "";
+            };
+            isTestnet = mkOption {
+              type = types.bool;
+              default = false;
+            };
+            l2 = mkOption {
+              type = types.bool;
+              default = false;
+            };
             rpcUri = mkOption { type = types.str; };
             blockExplorerUriTemplate = mkOption {
               type = types.attrsOf types.str;
@@ -88,8 +118,30 @@
             };
             transactionService = mkOption { type = types.str; };
             nativeCurrency = mkOption {
-              type = types.attrsOf types.str;
-              description = "Map of { name, symbol, decimals (as string) }.";
+              type = types.submodule {
+                options = {
+                  name = mkOption { type = types.str; };
+                  symbol = mkOption { type = types.str; };
+                  decimals = mkOption {
+                    type = types.int;
+                    default = 18;
+                  };
+                  logoUri = mkOption {
+                    type = types.str;
+                    description = ''
+                      URL to currency logo image. Safe Client Gateway
+                      Zod-validates this as a non-null string at runtime
+                      (`/v2/chains` 404s the whole list if any chain has
+                      a null logo). Use a placeholder URL if the chain
+                      doesn't have an official logo.
+                    '';
+                  };
+                };
+              };
+            };
+            chainLogoUri = mkOption {
+              type = types.nullOr types.str;
+              default = null;
             };
           };
         }

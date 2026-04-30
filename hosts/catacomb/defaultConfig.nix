@@ -27,16 +27,24 @@ in
       };
     };
 
+    # ── Service keys ───────────────────────────────────────────────────
+    services = lib.mkDefault [ "WALLET_WEB" ];
+
     # ── Chains ─────────────────────────────────────────────────────────
     # Defaults to Ethereum Classic mainnet (61) + Mordor testnet (63),
-    # using ETC Cooperative's public RPCs. Override or extend in config.nix.
+    # using ETC Cooperative's public RPCs. Override or extend in your
+    # consumer flake. The single bundled txs container indexes one chain
+    # — Mordor is registered for visibility but Safe interactions will
+    # fail until a separate txs is wired (known gap).
     chains = lib.mkDefault {
       etc = {
         chainId = 61;
         shortName = "etc";
         chainName = "Ethereum Classic";
+        description = "Ethereum Classic mainnet";
+        isTestnet = false;
         rpcUri = "https://rpc.mainnet.etccooperative.org";
-        transactionService = "https://transaction-classic.${d}";
+        transactionService = "https://${d}/txs";
         blockExplorerUriTemplate = {
           address = "https://blockscout.com/etc/mainnet/address/{{address}}";
           txHash = "https://blockscout.com/etc/mainnet/tx/{{txHash}}";
@@ -45,15 +53,19 @@ in
         nativeCurrency = {
           name = "Ether Classic";
           symbol = "ETC";
-          decimals = "18";
+          decimals = 18;
+          logoUri = "https://blockscout.com/etc/mainnet/images/logo.png";
         };
+        chainLogoUri = "https://blockscout.com/etc/mainnet/images/logo.png";
       };
       mordor = {
         chainId = 63;
         shortName = "etcm";
         chainName = "Mordor";
+        description = "Ethereum Classic Mordor testnet";
+        isTestnet = true;
         rpcUri = "https://rpc.mordor.etccooperative.org";
-        transactionService = "https://transaction-mordor.${d}";
+        transactionService = "https://${d}/txs";
         blockExplorerUriTemplate = {
           address = "https://blockscout.com/etc/mordor/address/{{address}}";
           txHash = "https://blockscout.com/etc/mordor/tx/{{txHash}}";
@@ -62,8 +74,10 @@ in
         nativeCurrency = {
           name = "Mordor Ether Classic";
           symbol = "METC";
-          decimals = "18";
+          decimals = 18;
+          logoUri = "https://blockscout.com/etc/mordor/images/logo.png";
         };
+        chainLogoUri = "https://blockscout.com/etc/mordor/images/logo.png";
       };
     };
   };

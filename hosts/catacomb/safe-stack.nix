@@ -138,36 +138,68 @@ in
     };
   };
 
-  # ── Chain registration ───────────────────────────────────────────────────
-  # Idempotent per chain in `catacomb.chains`. Posts to the internal nginx
-  # the upstream stack stands up on 127.0.0.1:8000 → /cfg/api/v1/chains/.
+  # ── Chain + service registration ─────────────────────────────────────────
+  # Seeds cfg-service via `docker exec catacomb-cfg-web-1 python manage.py
+  # shell` — the public `/cfg/api/v1/chains/` endpoint is read-only and
+  # 405s on POST. `update_or_create` makes the script idempotent so it can
+  # run on every rebuild.
+  #
+  # `Service` rows must exist or `/v2/chains/{service_key}/` returns 404
+  # (cfg-service does `get_object_or_404` on the service key) — that
+  # cascades into a 404 on the CGW chain list and breaks the UI.
   systemd.services.catacomb-chain-bootstrap =
     let
-      inherit (cfg.branding) theme;
-      payloads = lib.mapAttrsToList (
-        _name: chain:
-        builtins.toJSON {
-          chainId = toString chain.chainId;
-          inherit (chain) chainName shortName;
-          rpcUri = {
-            authentication = "NO_AUTHENTICATION";
-            value = chain.rpcUri;
-          };
-          publicRpcUri = {
-            authentication = "NO_AUTHENTICATION";
-            value = chain.rpcUri;
-          };
-          safeAppsRpcUri = {
-            authentication = "NO_AUTHENTICATION";
-            value = chain.rpcUri;
-          };
-          inherit (chain) blockExplorerUriTemplate nativeCurrency transactionService;
-          theme = { inherit (theme) textColor backgroundColor; };
-        }
-      ) cfg.chains;
+      bootstrapData = {
+        inherit (cfg) services;
+        chains = lib.mapAttrsToList (_name: c: {
+          id = c.chainId;
+          name = c.chainName;
+          short_name = c.shortName;
+          inherit (c) description;
+          inherit (c) l2;
+          is_testnet = c.isTestnet;
+          zk = false;
+          rpc_authentication = "NO_AUTHENTICATION";
+          rpc_uri = c.rpcUri;
+          public_rpc_authentication = "NO_AUTHENTICATION";
+          public_rpc_uri = c.rpcUri;
+          safe_apps_rpc_authentication = "NO_AUTHENTICATION";
+          safe_apps_rpc_uri = c.rpcUri;
+          block_explorer_uri_address_template = c.blockExplorerUriTemplate.address;
+          block_explorer_uri_tx_hash_template = c.blockExplorerUriTemplate.txHash;
+          block_explorer_uri_api_template = c.blockExplorerUriTemplate.api;
+          currency_name = c.nativeCurrency.name;
+          currency_symbol = c.nativeCurrency.symbol;
+          currency_decimals = c.nativeCurrency.decimals;
+          currency_logo_uri = c.nativeCurrency.logoUri;
+          chain_logo_uri = c.chainLogoUri;
+          transaction_service_uri = c.transactionService;
+          theme_text_color = cfg.branding.theme.textColor;
+          theme_background_color = cfg.branding.theme.backgroundColor;
+        }) cfg.chains;
+      };
+
+      bootstrapPy = pkgs.writeText "catacomb-chain-bootstrap.py" ''
+        import json
+        from chains.models import Chain, Service
+
+        data = json.loads(${builtins.toJSON (builtins.toJSON bootstrapData)})
+
+        for key in data["services"]:
+            _, created = Service.objects.update_or_create(
+                key=key,
+                defaults={"name": key, "description": f"{key} service"},
+            )
+            print(f"service {key}: {'created' if created else 'updated'}")
+
+        for c in data["chains"]:
+            cid = c.pop("id")
+            chain, created = Chain.objects.update_or_create(id=cid, defaults=c)
+            print(f"chain {cid} ({chain.name}): {'created' if created else 'updated'}")
+      '';
     in
     {
-      description = "Seed Catacomb chains into safe-config-service";
+      description = "Seed Catacomb chains and services into safe-config-service";
       wantedBy = [ "multi-user.target" ];
       after = [ "catacomb-stack.service" ];
       requires = [ "catacomb-stack.service" ];
@@ -175,21 +207,25 @@ in
         Type = "oneshot";
         RemainAfterExit = true;
       };
-      path = [ pkgs.curl ];
+      path = [
+        pkgs.docker
+        pkgs.curl
+        pkgs.coreutils
+      ];
       script = ''
-        set -eu
-        token=$(cat ${stateDir}/secrets/cgw_auth_token)
-        for i in $(seq 1 90); do
-          curl --fail --silent http://127.0.0.1:8000/cfg/api/v1/about/ >/dev/null && break
+        set -euo pipefail
+
+        # Wait for cfg-web to answer through the internal nginx (the same
+        # hop CGW uses, so this also confirms cfg→cgw plumbing).
+        for _ in $(seq 1 90); do
+          curl --fail --silent http://127.0.0.1:8000/cfg/api/v1/about/ \
+            >/dev/null 2>&1 && break
           sleep 2
         done
-      ''
-      + lib.concatMapStringsSep "\n" (json: ''
-        curl --fail --silent --show-error \
-          -X POST -H 'Content-Type: application/json' \
-          -H "Authorization: Bearer $token" \
-          --data ${lib.escapeShellArg json} \
-          http://127.0.0.1:8000/cfg/api/v1/chains/ || true
-      '') payloads;
+
+        # Pipe the seed script in via stdin → Django shell exec.
+        docker exec -i -w /app/src catacomb-cfg-web-1 \
+          python manage.py shell <${bootstrapPy}
+      '';
     };
 }
