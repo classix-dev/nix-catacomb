@@ -16,6 +16,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # GH-hosted runners boot with ~21 GB free on `/`, which the Nix
+      # builder uses for `/tmp/nix-build-*`. By the time the Safe-Wallet
+      # build has unpacked `node_modules`, written `.next/`, the webpack
+      # pack cache, and the static export, that's not enough — `next
+      # build` dies with ENOSPC during page-data collection. Reclaiming
+      # the preinstalled toolchains we don't use frees ~25–30 GB.
+      - name: Free disk space on /
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          docker-images: true
+          large-packages: false
+          swap-storage: false
+
       # GH-hosted runners ship with ~7 GB RAM and a pre-existing
       # `/swapfile` we can't touch ("Text file busy"). Add our own on
       # the larger `/mnt` partition. `next build`'s prerender phase
