@@ -31,11 +31,10 @@ in
     services = lib.mkDefault [ "WALLET_WEB" ];
 
     # ── Chains ─────────────────────────────────────────────────────────
-    # Defaults to Ethereum Classic mainnet (61) + Mordor testnet (63),
-    # using ETC Cooperative's public RPCs. Override or extend in your
-    # consumer flake. The single bundled txs container indexes one chain
-    # — Mordor is registered for visibility but Safe interactions will
-    # fail until a separate txs is wired (known gap).
+    # Defaults to Ethereum Classic mainnet (61), using ETC Cooperative's
+    # public RPC. Adding more chains requires standing up a parallel
+    # `txs` stack per chain — the bundled compose project indexes one.
+    # Override or extend in your consumer flake.
     chains = lib.mkDefault {
       etc = {
         chainId = 61;
@@ -57,27 +56,6 @@ in
           logoUri = "https://blockscout.com/etc/mainnet/images/logo.png";
         };
         chainLogoUri = "https://blockscout.com/etc/mainnet/images/logo.png";
-      };
-      mordor = {
-        chainId = 63;
-        shortName = "etcm";
-        chainName = "Mordor";
-        description = "Ethereum Classic Mordor testnet";
-        isTestnet = true;
-        rpcUri = "https://rpc.mordor.etccooperative.org";
-        transactionService = "https://${d}/txs";
-        blockExplorerUriTemplate = {
-          address = "https://blockscout.com/etc/mordor/address/{{address}}";
-          txHash = "https://blockscout.com/etc/mordor/tx/{{txHash}}";
-          api = "https://blockscout.com/etc/mordor/api?module={{module}}&action={{action}}&address={{address}}&apiKey={{apiKey}}";
-        };
-        nativeCurrency = {
-          name = "Mordor Ether Classic";
-          symbol = "METC";
-          decimals = 18;
-          logoUri = "https://blockscout.com/etc/mordor/images/logo.png";
-        };
-        chainLogoUri = "https://blockscout.com/etc/mordor/images/logo.png";
       };
     };
   };

@@ -3,8 +3,8 @@
 Nix flake that deploys a self-hosted [Safe](https://safe.global) multi-sig
 wallet onto a single VM, branded and configured via Nix module options.
 
-The default chain set is **Ethereum Classic** (61) and **Mordor testnet**
-(63), branded as *Classix Catacomb Multi-Sig*; both are overrideable.
+The default chain is **Ethereum Classic** (61), branded as
+*Classix Catacomb Multi-Sig*; both are overrideable.
 
 The stack is upstream `safe-global/safe-infrastructure`'s docker-compose
 project run verbatim against a NixOS-managed Docker daemon, plus a
@@ -191,10 +191,10 @@ nix flake check      # statix, deadnix, treefmt as flake checks
 
 ## Known gaps
 
-- The bundled `txs` container indexes a single chain — Mordor (chain 63)
-  is registered in cfg-service for visibility but Safe interactions on
-  it will fail until a separate txs container is wired in
-  `safe-stack.nix`.
+- The bundled `txs` compose project indexes a single chain. Adding more
+  chains to `catacomb.chains` only registers them in cfg-service; Safe
+  interactions on the extra chains will fail until you stand up a
+  per-chain `txs-*` stack and point each `transactionService` at it.
 - The UI build skips `yarn fetch-chains` (network-dependent); the app
   falls back to a runtime CGW request, costing one extra round-trip
   before first paint.
