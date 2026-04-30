@@ -43,19 +43,18 @@ services:
       AUTH_POST_LOGIN_REDIRECT_URI: "https://@CATACOMB_DOMAIN@/"
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
 
+  # The upstream UI is replaced by a Nix-built static export served from
+  # the host nginx (see hosts/catacomb/ui.nix). The `ui:` service is kept
+  # only as a stub on :8080 — internal nginx resolves the `ui` hostname
+  # at startup, so removing it would break the whole stack. Returns 410
+  # Gone to make stray internal hits visible. Reuses `nginx:alpine` (the
+  # internal nginx already pulls this image).
   ui:
-    environment:
-      NEXT_PUBLIC_GATEWAY_URL_PRODUCTION: "https://@CATACOMB_DOMAIN@/cgw"
-      NEXT_PUBLIC_DEFAULT_MAINNET_CHAIN_ID: "@CATACOMB_CHAIN_ID@"
-      NEXT_PUBLIC_IS_PRODUCTION: "true"
-      # `next build` runs at container-start to bake in NEXT_PUBLIC_* env
-      # vars. Default 2 GB heap OOMs; 6 GB exceeds host headroom alongside
-      # the rest of the stack. 3 GB fits.
-      NODE_OPTIONS: "--max-old-space-size=3072"
-    volumes:
-      # Persist the Next.js build cache so subsequent restarts skip the
-      # ~10-min rebuild. First boot still pays the build cost.
-      - ui-next-cache:/app/apps/web/.next
-
-volumes:
-  ui-next-cache: {}
+    image: nginx:alpine
+    entrypoint: [ "sh", "-c" ]
+    command:
+      - |
+        cat >/etc/nginx/conf.d/default.conf <<EOF
+        server { listen 8080; location / { return 410 "ui served from host nginx\n"; } }
+        EOF
+        exec nginx -g 'daemon off;'

@@ -16,6 +16,7 @@
     ./disko.nix
     ./safe-stack.nix
     ./nginx.nix
+    ./ui.nix
   ];
 
   system.stateVersion = "25.05";

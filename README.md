@@ -20,14 +20,16 @@ layout driven by [disko](https://github.com/nix-community/disko).
 ```
 flake.nix                       inputs, devShell, nixosConfigurations.catacomb
 hosts/catacomb/
-  configuration.nix             base NixOS (boot, ssh, podman, firewall)
+  default.nix                   base NixOS (boot, ssh, docker, firewall)
   options.nix                   declares every catacomb.* option
   defaultConfig.nix             defaults for every option (one obvious place)
-  config.nix.example            template for per-deploy overrides
-  config.nix                    YOUR per-deploy overrides (gitignored)
   disko.nix                     single-disk BIOS layout
-  safe-stack.nix                17 OCI containers, secrets, chain-bootstrap
-  nginx.nix                     reverse proxy, ACME TLS, sub_filter branding
+  safe-stack.nix                upstream safe-infrastructure compose stack
+  override.yml.tmpl             per-deploy compose override (env, image pins, ui-stub)
+  nginx.nix                     TLS termination + ACME wrapper
+  ui.nix                        host-served static UI + backend path-fanout locations
+pkgs/safe-wallet-web/           Nix derivation that builds apps/web statically
+.github/workflows/build.yml     cachix push (https://classix.cachix.org)
 ```
 
 ## Deploying guide
@@ -110,20 +112,38 @@ nixos-rebuild switch --flake .#catacomb --target-host root@<vm-ip>
 Per [`safe-global/safe-infrastructure`](https://github.com/safe-global/safe-infrastructure),
 mirrored into NixOS systemd units:
 
-| Tier         | Containers                                                                 |
+| Tier         | Components                                                                 |
 |--------------|----------------------------------------------------------------------------|
-| Frontend     | `ui` ([safe-wallet-monorepo](https://github.com/safe-global/safe-wallet-monorepo)), `nginx` |
+| Frontend     | static [safe-wallet-monorepo](https://github.com/safe-global/safe-wallet-monorepo) build (Nix-built `next export`), served by host nginx |
 | Gateway      | `cgw-web` ([safe-client-gateway](https://github.com/safe-global/safe-client-gateway)), `cgw-redis`, `cgw-db` |
 | Config       | `cfg-web` ([safe-config-service](https://github.com/safe-global/safe-config-service)), `cfg-db` |
 | Transactions | `txs-web` ([safe-transaction-service](https://github.com/safe-global/safe-transaction-service)), 3× workers, scheduler, `txs-db`, `txs-redis`, `txs-rabbitmq` |
 | Events       | `events-web`, `events-db`, `general-rabbitmq`                              |
 
-Branding lands in two ways:
-- **Theme colors** (`branding.theme.*`) → POSTed per chain to `cfg-service`
-  by the `catacomb-chain-bootstrap` systemd oneshot. No image rebuild.
-- **App name** (`branding.appName`) → swapped into HTML/JS responses by an
-  nginx `sub_filter` rule on the UI vhost. Stop-gap; a proper UI rebuild
-  from the monorepo is a follow-up.
+### Frontend
+
+`safe-wallet-monorepo` is pinned via the `safe-wallet-web` flake input
+(release tag `web-v1.88.0` at the time of writing) and built statically
+by `pkgs/safe-wallet-web`. The output is a directory of HTML/JS/CSS that
+the host nginx serves directly from the Nix store — no UI container, no
+runtime build.
+
+Branding is **baked at build time**:
+- **App name** (`branding.appName`) — substituted over `Safe{Wallet}` /
+  `Safe Wallet` in the source before `next build`.
+- **Gateway URL / chain id** (`domain`, `chains.etc.chainId`) — exported
+  as `NEXT_PUBLIC_*` env vars consumed by `next build`.
+
+Any change to those values triggers a rebuild of the UI derivation. A
+single build takes ~5–10 min on a 4 vCPU box; cachix
+([`https://classix.cachix.org`](https://classix.cachix.org)) absorbs
+the cost when nothing changed. The flake declares it as a substituter
+in `nixConfig`, and the `build.yml` workflow pushes every store path to
+it on `main`.
+
+**Theme colors** (`branding.theme.*`) still get POSTed per chain to
+`cfg-service` by the `catacomb-chain-bootstrap` systemd oneshot — those
+live in chain metadata, not the bundle.
 
 ## Recommended host requirements
 
@@ -154,12 +174,13 @@ nix flake check      # statix, deadnix, treefmt as flake checks
 
 ## Known gaps
 
-- App-name override is HTML-substitution only; replace with a UI rebuild
-  from `safe-wallet-monorepo` for a real fix.
 - `chain-bootstrap` JSON payload shape needs verification against a live
   `safe-config-service` admin API.
 - Mordor (chain 63) `txs` instance is declared in defaults but not yet
   wired to its own container in `safe-stack.nix`.
+- The UI build skips `yarn fetch-chains` (network-dependent); the app
+  falls back to a runtime CGW request, costing one extra round-trip
+  before first paint.
 - Secrets are auto-generated on first boot to `/var/lib/catacomb/secrets/`.
   For multi-operator deploys, swap to
   [sops-nix](https://github.com/Mic92/sops-nix) or

@@ -195,6 +195,7 @@
         "nixos-anywhere": "nixos-anywhere",
         "nixpkgs": "nixpkgs",
         "safe-infrastructure": "safe-infrastructure",
+        "safe-wallet-web": "safe-wallet-web",
         "treefmt-nix": "treefmt-nix_2"
       }
     },
@@ -211,6 +212,23 @@
       "original": {
         "owner": "safe-global",
         "repo": "safe-infrastructure",
+        "type": "github"
+      }
+    },
+    "safe-wallet-web": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1777377118,
+        "narHash": "sha256-KFh+FtLn6ClLKGS2Tt2R5YL4PUTGYxGHZZdvodeSv2M=",
+        "owner": "safe-global",
+        "repo": "safe-wallet-monorepo",
+        "rev": "7f39e3f1af8e11eba5fa7f23514058f7d1cf3a9f",
+        "type": "github"
+      },
+      "original": {
+        "owner": "safe-global",
+        "ref": "web-v1.88.0",
+        "repo": "safe-wallet-monorepo",
         "type": "github"
       }
     },

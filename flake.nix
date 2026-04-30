@@ -1,6 +1,13 @@
 {
   description = "Nix flake for provisioning cloud VMs (nixos-anywhere + disko).";
 
+  nixConfig = {
+    extra-substituters = [ "https://classix.cachix.org" ];
+    extra-trusted-public-keys = [
+      "classix.cachix.org-1:wwRxPZ1+4aY6IWpf+7xBxoc0MBrYQB9GsSNSKwLzqBo="
+    ];
+  };
+
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
@@ -21,6 +28,14 @@
     # rather than re-implement the topology in Nix.
     safe-infrastructure = {
       url = "github:safe-global/safe-infrastructure";
+      flake = false;
+    };
+
+    # Safe wallet web frontend — pinned to the same release tag as the
+    # docker image (web-v1.88.0). Built statically (next export) by
+    # `pkgs/safe-wallet-web` and served directly from the host nginx.
+    safe-wallet-web = {
+      url = "github:safe-global/safe-wallet-monorepo/web-v1.88.0";
       flake = false;
     };
   };
@@ -50,6 +65,15 @@
               statix.enable = true;
               deadnix.enable = true;
             };
+          };
+
+          # `nix build .#safe-wallet-web-static` — produces the static
+          # `out/` directory served by the host nginx. Built with default
+          # branding here; per-deploy values (domain, chain, appName) are
+          # injected at module evaluation time via `pkgs.callPackage`
+          # in `hosts/catacomb/ui.nix`.
+          packages.safe-wallet-web-static = pkgs.callPackage ./pkgs/safe-wallet-web {
+            src = inputs.safe-wallet-web;
           };
 
           checks = {
@@ -117,7 +141,10 @@
               { ... }:
               {
                 imports = [ ./hosts/catacomb ];
-                _module.args.safe-infrastructure = inputs.safe-infrastructure;
+                _module.args = {
+                  inherit (inputs) safe-infrastructure;
+                  inherit (inputs) safe-wallet-web;
+                };
               };
           in
           {
