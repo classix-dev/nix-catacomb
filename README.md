@@ -64,6 +64,8 @@ all become live.
 
 ## Deploying guide
 
+> Just ask your LLM agent to get Nix set up and point her at this repo.
+
 This repo is a *library* flake — it exposes `nixosModules.catacomb` and a
 `packages.safe-wallet-web-static` derivation, but it doesn't deploy itself.
 Wrap it in a small consumer flake that pins the library and supplies your
