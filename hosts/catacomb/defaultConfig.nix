@@ -19,11 +19,21 @@ in
     tlsEnabled = lib.mkDefault true;
 
     # ── Branding ───────────────────────────────────────────────────────
+    # Defaults reflect the canonical Catacomb identity (Classix-flavored).
+    # Override per-deploy in your consumer flake.
     branding = {
-      appName = lib.mkDefault "Catacomb Multi-Sig";
+      appName = lib.mkDefault "Catacomb Multisig";
+      tagline = lib.mkDefault "classix edition";
+      githubRepoLink = lib.mkDefault "https://github.com/classix-dev/nix-catacomb";
+      footerLinks = lib.mkDefault [
+        {
+          label = "classix.dev";
+          url = "https://classix.dev";
+        }
+      ];
       theme = {
-        textColor = lib.mkDefault "#ffffff";
-        backgroundColor = lib.mkDefault "#000000";
+        textColor = lib.mkDefault "#ddffdc";
+        backgroundColor = lib.mkDefault "#0a0a0a";
       };
     };
 
@@ -35,6 +45,10 @@ in
     # public RPC. Adding more chains requires standing up a parallel
     # `txs` stack per chain — the bundled compose project indexes one.
     # Override or extend in your consumer flake.
+    # rpcUri points at the local CORS-injecting proxy (`rpc.${d}`)
+    # configured in `nginx.nix`, which forwards to the upstream ETC
+    # Cooperative RPC. The public RPC fails browser CORS preflight so
+    # the wallet can't talk to it directly.
     chains = lib.mkDefault {
       etc = {
         chainId = 61;
@@ -42,7 +56,7 @@ in
         chainName = "Ethereum Classic";
         description = "Ethereum Classic mainnet";
         isTestnet = false;
-        rpcUri = "https://rpc.mainnet.etccooperative.org";
+        rpcUri = "https://rpc.${d}";
         transactionService = "https://${d}/txs";
         blockExplorerUriTemplate = {
           address = "https://blockscout.com/etc/mainnet/address/{{address}}";

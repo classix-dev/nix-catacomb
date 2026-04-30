@@ -88,9 +88,28 @@ in
     # We pass through a single proxy hop rather than re-implement the
     # rules here; that nginx has gzip, websocket forwarding, and
     # service-specific timeouts dialled in.
+    #
+    # The `/cgw/` extraConfig also rewrites cfg-service's broken
+    # MEDIA_URL prefix on chain-logo URLs. CGW serializes them with
+    # `http://localhost:8000/cfg/media/<the-url>` baked in (Mixed
+    # Content + broken on the public host); whatever absolute URL is
+    # configured for the chain logo, cfg-service mangles it into
+    # `http://localhost:8000/cfg/media/https%3A/<rest>` (Django
+    # collapses `//` to `/` and URL-encodes the colon). Rewrite both
+    # the single- and double-encoded forms back to `https://<rest>`
+    # before the JSON reaches the browser. Targets JSON responses only;
+    # `sub_filter` works because the rewrite is a literal substring
+    # (no JSON escaping involved for slashes/colons in this URL).
     locations."/cgw/" = {
       proxyPass = "http://127.0.0.1:8000";
       proxyWebsockets = true;
+      extraConfig = ''
+        proxy_set_header Accept-Encoding "";
+        sub_filter_once off;
+        sub_filter_types application/json;
+        sub_filter 'http://localhost:8000/cfg/media/https%3A/'   'https://';
+        sub_filter 'http://localhost:8000/cfg/media/https%253A/' 'https://';
+      '';
     };
     locations."/cfg/" = {
       proxyPass = "http://127.0.0.1:8000";
