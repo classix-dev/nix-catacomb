@@ -13,11 +13,11 @@
 }:
 let
   versions = {
-    ui = "v1.70.0";
-    cgw = "v2.130.0";
-    cfg = "v2.108.0";
-    txs = "v4.46.0";
-    events = "v1.32.0";
+    ui = "v1.88.0";
+    cgw = "v1.108.0";
+    cfg = "v2.94.0";
+    txs = "v6.3.0";
+    events = "v1.3.0";
   };
 
   # Secrets live in /var/lib/catacomb/secrets/, generated on first boot by
