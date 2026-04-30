@@ -235,9 +235,24 @@ nix flake check      # statix, deadnix, treefmt as flake checks
 ## Known gaps
 
 - TODO: multi chain
+- TODO: observability. Today there's no auto-recovery on container
+  exit (upstream's `docker-compose.yml` ships no `restart:` policies,
+  and our `catacomb-stack` systemd unit is `Type=oneshot` — it brings
+  the stack up at boot and forgets), no health-derived alerting, no
+  log aggregation, no metrics export. A live deploy that loses a
+  container stays degraded until a human runs `systemctl restart
+  catacomb-stack`. Minimum viable: per-service `restart: unless-stopped`
+  in the override + a watchdog systemd timer that reconciles desired
+  vs running state. Stretch: Loki/Vector for logs, Prometheus +
+  Postgres/Redis/RabbitMQ exporters, alerts on container restart-count
+  growth + indexer lag.
 - The UI build skips `yarn fetch-chains` (network-dependent); the app
   falls back to a runtime CGW request, costing one extra round-trip
   before first paint.
+- `TOKENS_LOGO_BASE_URI` is left at upstream's `https://tokens-logo.localhost`
+  placeholder, so every ERC-20 logo URL in CGW responses 404s in the
+  browser. The wallet's `<img onError>` fallback handles it visually,
+  but the bytes-on-the-wire have a confusing hostname.
 - Secrets are auto-generated on first boot to `/var/lib/catacomb/secrets/`.
   For multi-operator deploys, swap to
   [sops-nix](https://github.com/Mic92/sops-nix) or
