@@ -82,6 +82,9 @@ let
           NEXT_PUBLIC_GATEWAY_URL_PRODUCTION: "https://${cfg.domain}/cgw"
           NEXT_PUBLIC_DEFAULT_MAINNET_CHAIN_ID: "${toString cfg.chains.etc.chainId}"
           NEXT_PUBLIC_IS_PRODUCTION: "true"
+          # The image does a Next.js build at container-start to bake runtime
+          # env vars in; Node's default 2 GB heap OOMs under it. Allow 6 GB.
+          NODE_OPTIONS: "--max-old-space-size=6144"
   '';
 
   # docker compose invocation used by every catacomb-stack systemd unit.
@@ -171,7 +174,11 @@ in
         ln -sfn ${override} ${overrideFile}
 
         ${composeExe} ${composeArgs} pull --quiet
-        ${composeExe} ${composeArgs} up -d --remove-orphans
+        # `up -d` doesn't recreate downstream containers when their deps
+        # (image / config) change. Tell compose to recreate any whose
+        # config differs from running state — `--no-recreate` would be
+        # the inverse.
+        ${composeExe} ${composeArgs} up -d --remove-orphans --wait-timeout 300
       '';
       ExecStop = pkgs.writeShellScript "catacomb-stack-down" ''
         ${composeExe} ${composeArgs} down --remove-orphans
