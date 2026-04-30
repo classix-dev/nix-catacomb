@@ -13,6 +13,26 @@ chain-bootstrap oneshot that seeds `safe-config-service`. Deployed onto a
 fresh VM by [nixos-anywhere](https://github.com/nix-community/nixos-anywhere)
 with disk layout driven by [disko](https://github.com/nix-community/disko).
 
+## Why Nix?
+
+The upstream reference deployment is [`safe-global/safe-infrastructure`](https://github.com/safe-global/safe-infrastructure) — *"one `docker-compose.yml` to rule them all."* nix-catacomb runs that same compose stack verbatim, but lifts the frontend out of Docker and runs everything against NixOS. The most useful thing that buys is turning the wallet UI into a **hash**: instead of a `safeglobal/safe-wallet-web` container that runs `next build` at boot, the frontend is built reproducibly from `flake.lock` and served by host nginx straight from a **read-only, content-addressed `/nix/store/<hash>-...` path**.
+
+### What it buys you
+
+- **Frontend tamper-resistance.** The Nix store is mounted read-only at the kernel level. Modifying the served bundle requires a new build with a new hash; in-place edits aren't a path.
+- **Hash-pinned supply chain.** Upstream's `.env.sample` pulls every Safe service at `:latest`; here we pin exact image tags (see `hosts/catacomb/safe-stack.nix`) and lock every nixpkgs commit, fetched tarball, and transitive dep in `flake.lock`. The "auto-pull a malicious 1.0.1" class (event-stream, ua-parser-js, colors.js) is structurally impossible without an explicit `nix flake update`.
+- **Deterministic, composable patch overlays.** ETC-specific changes (branding, chain integration) are small named files (`patches/0001-catacomb-branding.patch`) layered at build time over a hash-pinned upstream `safe-wallet-monorepo`. Same patch + same upstream → same bundle hash, every time. The full divergence from stock Safe is one diff; no vendored fork to keep in sync.
+- **Server has only what's declared.** NixOS ships no leftover distro utilities and no container-base shells or package managers — every binary, port, service, and user is in `hosts/catacomb/*.nix`, reviewable in a PR diff.
+- **No JS build runs on the host.** Upstream's `safeglobal/safe-wallet-web` container runs `yarn build` (a Next.js compile that executes hundreds of npm packages' build hooks) every time it starts. Here, that compile happens in a Nix sandbox at deploy time elsewhere; the production VM only serves static files.
+- **Atomic rollback.** `nixos-rebuild --rollback` reverts kernel + packages + configs together; a botched deploy is one command back to the prior generation.
+
+### What it doesn't buy you
+
+- **A trustworthy upstream.** Pinning prevents auto-pulling a poisoned commit; it doesn't review the next `nix flake update`. A malicious PR upstream is faithfully built into a poisoned bundle every rebuilder agrees on. Human review at bump time is the real defense.
+- **The backend.** `cgw-web` / `cfg-web` / `txs-web` / `events-web` plus Postgres / Redis / RabbitMQ are still pulled as Docker images; a compromised gateway can misrepresent what the UI shows for signing. **Nixifying the backend is on the roadmap.**
+- **Build-time `postinstall` scripts.** The Nix build sandbox blocks network and ambient state but still executes upstream build code; a malicious `postinstall` can plant code in the bundle.
+- **Root on the host, TLS / DNS / CA, the user's browser / OS / hardware wallet.** Out of scope for deploy tooling.
+
 ## Layout
 
 ```
