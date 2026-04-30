@@ -194,7 +194,24 @@
         "flake-parts": "flake-parts",
         "nixos-anywhere": "nixos-anywhere",
         "nixpkgs": "nixpkgs",
+        "safe-infrastructure": "safe-infrastructure",
         "treefmt-nix": "treefmt-nix_2"
+      }
+    },
+    "safe-infrastructure": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1772799367,
+        "narHash": "sha256-HnCPY4S0Ew6E+gxzo5jTmOjkWHHleX+xjwVqwKkhwjw=",
+        "owner": "safe-global",
+        "repo": "safe-infrastructure",
+        "rev": "42050ca50df1c37bb81ce53e3beb3fe98cc5f3c5",
+        "type": "github"
+      },
+      "original": {
+        "owner": "safe-global",
+        "repo": "safe-infrastructure",
+        "type": "github"
       }
     },
     "treefmt-nix": {

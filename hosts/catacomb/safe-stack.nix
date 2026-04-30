@@ -1,403 +1,171 @@
+# Run upstream `safe-global/safe-infrastructure` (docker-compose) verbatim
+# against a NixOS-managed Docker daemon. We pin the upstream source via the
+# `safe-infrastructure` flake input — bump with `nix flake update`.
+#
+# Per-deploy values (RPC URL, branding, secrets) are injected via:
+#   - /var/lib/catacomb/.env          (top-level docker-compose vars)
+#   - /var/lib/catacomb/override.yml  (per-service env overrides)
+#
+# Both are regenerated on each rebuild by the catacomb-stack-prepare
+# oneshot below.
 {
   config,
   lib,
   pkgs,
+  safe-infrastructure,
   ...
 }:
 let
+  cfg = config.catacomb;
+  stateDir = "/var/lib/catacomb";
+  envFile = "${stateDir}/.env";
+  overrideFile = "${stateDir}/override.yml";
+
+  # Pinned image versions — bumped here, applied on next rebuild.
   versions = {
-    ui = "v1.88.0";
-    cgw = "v1.108.0";
-    cfg = "v2.94.0";
-    txs = "v6.3.0";
-    events = "v1.3.0";
+    UI_VERSION = "v1.88.0";
+    CGW_VERSION = "v1.108.0";
+    CFG_VERSION = "v2.94.0";
+    TXS_VERSION = "v6.3.0";
+    EVENTS_VERSION = "v1.3.0";
   };
 
-  secretsDir = "/var/lib/catacomb/secrets";
-  envFile = name: "${secretsDir}/${name}.env";
+  # Compose override — references env vars from /var/lib/catacomb/.env
+  # (which the prepare oneshot generates).
+  override = pkgs.writeText "catacomb-override.yml" ''
+    services:
+      cfg-db:        { environment: { POSTGRES_PASSWORD: "''${POSTGRES_PASSWORD}" } }
+      cgw-db:        { environment: { POSTGRES_PASSWORD: "''${POSTGRES_PASSWORD}" } }
+      txs-db:        { environment: { POSTGRES_PASSWORD: "''${POSTGRES_PASSWORD}" } }
+      events-db:     { environment: { POSTGRES_PASSWORD: "''${POSTGRES_PASSWORD}" } }
 
-  pgImage = "postgres:14-alpine";
-  redisImage = "redis:alpine";
-  rabbitImage = "rabbitmq:alpine";
-  network = "catacomb";
+      cfg-web:
+        environment:
+          SECRET_KEY: "''${DJANGO_SECRET}"
+          DJANGO_SUPERUSER_PASSWORD: "''${DJANGO_SUPERUSER_PASSWORD}"
+          DJANGO_SUPERUSER_EMAIL: "admin@${cfg.domain}"
+          CGW_AUTH_TOKEN: "''${CGW_AUTH_TOKEN}"
+          POSTGRES_PASSWORD: "''${POSTGRES_PASSWORD}"
+          CSRF_TRUSTED_ORIGINS: "https://${cfg.domain}"
 
-  withNet = c: c // { extraOptions = (c.extraOptions or [ ]) ++ [ "--network=${network}" ]; };
+      txs-web:
+        environment:
+          DJANGO_SECRET_KEY: "''${DJANGO_SECRET}"
+          DATABASE_URL: "psql://postgres:''${POSTGRES_PASSWORD}@txs-db:5432/postgres"
+          CSRF_TRUSTED_ORIGINS: "https://${cfg.domain}"
 
-  # Upstream defaults — POSTGRES_PASSWORD here is overridden per-service via
-  # the secrets env file. POSTGRES_USER/DB stay 'postgres' to match every
-  # service's hard-coded DATABASE_URL = psql://postgres:...@<svc>-db/postgres.
-  pgEnv = {
-    POSTGRES_USER = "postgres";
-    POSTGRES_DB = "postgres";
-  };
+      txs-worker-indexer: &txs-worker-overrides
+        environment:
+          DJANGO_SECRET_KEY: "''${DJANGO_SECRET}"
+          DATABASE_URL: "psql://postgres:''${POSTGRES_PASSWORD}@txs-db:5432/postgres"
 
-  mkPostgres =
-    name:
-    withNet {
-      image = pgImage;
-      environment = pgEnv;
-      environmentFiles = [ (envFile "postgres") ];
-      volumes = [ "${name}-data:/var/lib/postgresql/data" ];
-    };
+      txs-worker-contracts-tokens: *txs-worker-overrides
+      txs-worker-notifications-webhooks: *txs-worker-overrides
+      txs-scheduler: *txs-worker-overrides
 
-  # Shared volumes for gunicorn unix sockets (txs-web ↔ nginx, cfg-web ↔ nginx).
-  # Names match upstream docker-compose for symmetry.
-  sharedTxs = "nginx-shared-txs";
-  sharedCfg = "nginx-shared-cfg";
+      events-web:
+        environment:
+          DATABASE_URL: "psql://postgres:''${POSTGRES_PASSWORD}@events-db:5432/postgres"
 
-  # Upstream txs.env, inlined. RPC + DATABASE password come from environmentFiles.
-  txsBaseEnv = {
-    PYTHONPATH = "/app/";
-    DJANGO_SETTINGS_MODULE = "config.settings.production";
-    DEBUG = "0";
-    ETH_L2_NETWORK = "1";
-    REDIS_URL = "redis://txs-redis:6379/0";
-    CELERY_BROKER_URL = "amqp://guest:guest@txs-rabbitmq/";
-    DJANGO_ALLOWED_HOSTS = "*";
-    FORCE_SCRIPT_NAME = "/txs/";
-    CSRF_TRUSTED_ORIGINS = "https://${config.catacomb.domain}";
-    EVENTS_QUEUE_URL = "amqp://general-rabbitmq:5672";
-    EVENTS_QUEUE_ASYNC_CONNECTION = "True";
-    EVENTS_QUEUE_EXCHANGE_NAME = "safe-transaction-service-events";
-    ETHEREUM_NODE_URL = config.catacomb.chains.etc.rpcUri;
-  };
+      cgw-web:
+        environment:
+          AUTH_TOKEN: "''${CGW_AUTH_TOKEN}"
 
-  # Upstream's nginx.conf (paths-based routing). Verbatim copy of
-  # safe-global/safe-infrastructure docker/nginx/nginx.conf.
-  internalNginxConf = pkgs.writeText "catacomb-internal-nginx.conf" ''
-    worker_processes 1;
-    events {
-      worker_connections 2000;
-      accept_mutex off;
-      use epoll;
-    }
-    http {
-      include mime.types;
-      default_type application/octet-stream;
-      sendfile on;
-
-      upstream txs_app_server   { server unix:/nginx-txs/gunicorn.socket fail_timeout=0; keepalive 32; }
-      upstream cfg_app_server   { ip_hash; server unix:/nginx-cfg/gunicorn.socket fail_timeout=0; keepalive 32; }
-      upstream cgw_app_server   { ip_hash; server cgw-web:3000 fail_timeout=0; keepalive 32; }
-      upstream events_app_server { ip_hash; server events-web:3000 fail_timeout=0; keepalive 32; }
-      upstream ui_server        { ip_hash; server ui:8080 fail_timeout=0; keepalive 32; }
-
-      server {
-        access_log off;
-        listen 8000 deferred;
-        charset utf-8;
-        keepalive_timeout 75s;
-
-        gzip on;
-        gzip_min_length 1000;
-        gzip_comp_level 2;
-        gzip_types text/plain text/css application/json application/javascript application/x-javascript text/javascript text/xml application/xml application/rss+xml application/atom+xml application/rdf+xml;
-        gzip_disable "MSIE [1-6]\.";
-
-        location /txs/static { alias /nginx-txs/staticfiles; expires 365d; }
-        location /txs/ {
-          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-          proxy_set_header X-Forwarded-Proto $scheme;
-          proxy_set_header Host $host;
-          proxy_redirect off;
-          proxy_pass http://txs_app_server/;
-        }
-
-        location /cfg/static { alias /nginx-cfg/staticfiles; expires 365d; }
-        location /cfg/ {
-          proxy_set_header Host $host;
-          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-          proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;
-          proxy_redirect off;
-          proxy_pass http://cfg_app_server/;
-          proxy_connect_timeout 60s;
-          proxy_read_timeout 60s;
-        }
-
-        location /cgw/ {
-          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-          proxy_set_header X-Forwarded-Proto $scheme;
-          proxy_set_header Host $host;
-          proxy_redirect off;
-          proxy_pass http://cgw_app_server/;
-        }
-
-        location /events/ {
-          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-          proxy_set_header X-Forwarded-Proto $scheme;
-          proxy_set_header Host $host;
-          proxy_redirect off;
-          proxy_pass http://events_app_server/events/;
-        }
-
-        location / {
-          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-          proxy_set_header X-Forwarded-Proto $scheme;
-          proxy_set_header Host $host;
-          proxy_redirect off;
-          proxy_pass http://ui_server/;
-        }
-      }
-    }
+      ui:
+        environment:
+          NEXT_PUBLIC_GATEWAY_URL_PRODUCTION: "https://${cfg.domain}/cgw"
+          NEXT_PUBLIC_DEFAULT_MAINNET_CHAIN_ID: "${toString cfg.chains.etc.chainId}"
+          NEXT_PUBLIC_IS_PRODUCTION: "true"
   '';
+
+  # docker compose invocation used by every catacomb-stack systemd unit.
+  composeExe = "${pkgs.docker-compose}/bin/docker-compose";
+  composeArgs = lib.concatStringsSep " " [
+    "--project-directory ${safe-infrastructure}"
+    "-f ${safe-infrastructure}/docker-compose.yml"
+    "-f ${overrideFile}"
+    "--env-file ${envFile}"
+    "--project-name catacomb"
+  ];
+
+  versionEnvLines = lib.concatStringsSep "\n" (lib.mapAttrsToList (k: v: "${k}=${v}") versions);
 in
 {
   systemd.tmpfiles.rules = [
-    "d ${secretsDir} 0700 root root -"
-    "d /var/lib/catacomb 0755 root root -"
+    "d ${stateDir} 0755 root root -"
+    "d ${stateDir}/secrets 0700 root root -"
   ];
 
-  # Generate runtime secrets at first boot, write per-service env files
-  # consumed via environmentFiles below.
-  systemd.services.catacomb-secrets-init = {
-    description = "Generate Catacomb runtime secrets on first boot";
+  # Use Docker (not podman) — upstream compose syntax assumes Docker, and
+  # docker-compose talks to the Docker daemon directly.
+  virtualisation.docker.enable = true;
+  environment.systemPackages = [ pkgs.docker-compose ];
+
+  # ── Stack lifecycle ─────────────────────────────────────────────────────
+  systemd.services.catacomb-stack = {
+    description = "Catacomb (Safe self-host) stack via docker compose";
     wantedBy = [ "multi-user.target" ];
-    before = map (c: "podman-${c}.service") [
-      "cgw-db"
-      "cfg-db"
-      "txs-db"
-      "events-db"
-      "cfg-web"
-      "cgw-web"
-      "txs-web"
-      "events-web"
-      "ui"
+    requires = [ "docker.service" ];
+    after = [
+      "docker.service"
+      "network-online.target"
     ];
-    serviceConfig = {
-      Type = "oneshot";
-      RemainAfterExit = true;
-    };
+    wants = [ "network-online.target" ];
+
     path = [
+      pkgs.docker
+      pkgs.docker-compose
       pkgs.openssl
       pkgs.coreutils
     ];
-    script = ''
-      set -eu
-      umask 077
-      gen() {
-        local f="${secretsDir}/$1"
-        [ -e "$f" ] || openssl rand -hex 32 > "$f"
-      }
-      gen django_secret
-      gen cgw_auth_token
-      gen postgres_password
 
-      pg=$(cat ${secretsDir}/postgres_password)
-      django=$(cat ${secretsDir}/django_secret)
-      cgw=$(cat ${secretsDir}/cgw_auth_token)
-
-      cat > ${envFile "postgres"} <<EOF
-      POSTGRES_PASSWORD=$pg
-      EOF
-
-      cat > ${envFile "cfg"} <<EOF
-      SECRET_KEY=$django
-      POSTGRES_PASSWORD=$pg
-      DJANGO_SUPERUSER_PASSWORD=$pg
-      CGW_AUTH_TOKEN=$cgw
-      EOF
-
-      cat > ${envFile "txs"} <<EOF
-      DJANGO_SECRET_KEY=$django
-      DATABASE_URL=psql://postgres:$pg@txs-db:5432/postgres
-      EOF
-
-      cat > ${envFile "cgw"} <<EOF
-      AUTH_TOKEN=$cgw
-      EOF
-
-      cat > ${envFile "events"} <<EOF
-      DATABASE_URL=psql://postgres:$pg@events-db:5432/postgres
-      EOF
-
-      chmod 600 ${secretsDir}/*.env
-    '';
-  };
-
-  virtualisation.oci-containers.containers = {
-
-    # ── Databases / brokers ─────────────────────────────────────────────
-    cgw-db = mkPostgres "cgw";
-    cfg-db = mkPostgres "cfg";
-    events-db = mkPostgres "events";
-    txs-db = (mkPostgres "txs") // {
-      cmd = [
-        "-c"
-        "max_connections=250"
-      ];
-    };
-
-    cgw-redis = withNet { image = redisImage; };
-    txs-redis = withNet { image = redisImage; };
-    txs-rabbitmq = withNet { image = rabbitImage; };
-    general-rabbitmq = withNet { image = rabbitImage; };
-
-    # ── Config service (Django, gunicorn → unix socket) ─────────────────
-    cfg-web = withNet {
-      image = "safeglobal/safe-config-service:${versions.cfg}";
-      environment = {
-        PYTHONDONTWRITEBYTECODE = "true";
-        DEBUG = "true";
-        ROOT_LOG_LEVEL = "INFO";
-        DJANGO_ALLOWED_HOSTS = "*";
-        GUNICORN_BIND_PORT = "8001";
-        DOCKER_NGINX_VOLUME_ROOT = "/nginx";
-        GUNICORN_BIND_SOCKET = "unix:/nginx/gunicorn.socket";
-        NGINX_ENVSUBST_OUTPUT_DIR = "/etc/nginx/";
-        POSTGRES_USER = "postgres";
-        POSTGRES_NAME = "postgres";
-        POSTGRES_HOST = "cfg-db";
-        POSTGRES_PORT = "5432";
-        DJANGO_SUPERUSER_USERNAME = "admin";
-        DJANGO_SUPERUSER_EMAIL = "admin@${config.catacomb.domain}";
-        DJANGO_OTP_ADMIN = "false";
-        DEFAULT_FILE_STORAGE = "django.core.files.storage.FileSystemStorage";
-        FORCE_SCRIPT_NAME = "/cfg/";
-        CGW_URL = "http://nginx:8000/cgw";
-        CSRF_TRUSTED_ORIGINS = "https://${config.catacomb.domain}";
-      };
-      environmentFiles = [ (envFile "cfg") ];
-      volumes = [ "${sharedCfg}:/nginx" ];
-      dependsOn = [ "cfg-db" ];
-    };
-
-    # ── Transaction service (Django + Celery, gunicorn → unix socket) ───
-    txs-web = withNet {
-      image = "safeglobal/safe-transaction-service:${versions.txs}";
-      environment = txsBaseEnv;
-      environmentFiles = [ (envFile "txs") ];
-      volumes = [ "${sharedTxs}:/nginx" ];
-      cmd = [ "docker/web/run_web.sh" ];
-      workdir = "/app";
-      dependsOn = [ "txs-worker-indexer" ];
-    };
-
-    txs-worker-indexer = withNet {
-      image = "safeglobal/safe-transaction-service:${versions.txs}";
-      environment = txsBaseEnv // {
-        WORKER_QUEUES = "default,indexing,processing";
-        RUN_MIGRATIONS = "1";
-      };
-      environmentFiles = [ (envFile "txs") ];
-      cmd = [ "docker/web/celery/worker/run.sh" ];
-      dependsOn = [
-        "txs-db"
-        "txs-redis"
-      ];
-    };
-
-    txs-worker-contracts-tokens = withNet {
-      image = "safeglobal/safe-transaction-service:${versions.txs}";
-      environment = txsBaseEnv // {
-        WORKER_QUEUES = "contracts,tokens";
-      };
-      environmentFiles = [ (envFile "txs") ];
-      cmd = [ "docker/web/celery/worker/run.sh" ];
-      dependsOn = [ "txs-worker-indexer" ];
-    };
-
-    txs-worker-notifications-webhooks = withNet {
-      image = "safeglobal/safe-transaction-service:${versions.txs}";
-      environment = txsBaseEnv // {
-        WORKER_QUEUES = "notifications,webhooks";
-      };
-      environmentFiles = [ (envFile "txs") ];
-      cmd = [ "docker/web/celery/worker/run.sh" ];
-      dependsOn = [ "txs-worker-indexer" ];
-    };
-
-    txs-scheduler = withNet {
-      image = "safeglobal/safe-transaction-service:${versions.txs}";
-      environment = txsBaseEnv;
-      environmentFiles = [ (envFile "txs") ];
-      cmd = [ "docker/web/celery/scheduler/run.sh" ];
-      dependsOn = [
-        "txs-db"
-        "txs-redis"
-      ];
-    };
-
-    # ── Events service (Node) ───────────────────────────────────────────
-    events-web = withNet {
-      image = "safeglobal/safe-events-service:${versions.events}";
-      environment = {
-        AMQP_URL = "amqp://general-rabbitmq:5672";
-        AMQP_EXCHANGE = "safe-transaction-service-events";
-        AMQP_QUEUE = "safe-events-service";
-        ADMIN_EMAIL = "admin@${config.catacomb.domain}";
-        ADMIN_PASSWORD = "admin"; # internal-only API; CGW talks to it via shared network
-        WEBHOOKS_CACHE_TTL = "300000";
-        NODE_ENV = "production";
-        URL_BASE_PATH = "/events";
-      };
-      environmentFiles = [ (envFile "events") ];
-      dependsOn = [
-        "events-db"
-        "general-rabbitmq"
-      ];
-    };
-
-    # ── Client Gateway (NestJS) ─────────────────────────────────────────
-    cgw-web = withNet {
-      image = "safeglobal/safe-client-gateway-nest:${versions.cgw}";
-      environment = {
-        HTTP_CLIENT_REQUEST_TIMEOUT_MILLISECONDS = "60000";
-        SAFE_CONFIG_BASE_URI = "http://nginx:8000/cfg";
-        ALLOW_CORS = "true";
-        REDIS_HOST = "cgw-redis";
-        LOG_LEVEL = "info";
-      };
-      environmentFiles = [ (envFile "cgw") ];
-      dependsOn = [ "cgw-redis" ];
-    };
-
-    # ── Web UI ──────────────────────────────────────────────────────────
-    ui = withNet {
-      image = "safeglobal/safe-wallet-web:${versions.ui}";
-      environment = {
-        NEXT_PUBLIC_GATEWAY_URL_PRODUCTION = "https://${config.catacomb.domain}/cgw";
-        NEXT_PUBLIC_DEFAULT_MAINNET_CHAIN_ID = toString config.catacomb.chains.etc.chainId;
-        NEXT_PUBLIC_IS_PRODUCTION = "true";
-      };
-    };
-
-    # ── Internal nginx (sole ingress to the stack) ──────────────────────
-    nginx = withNet {
-      image = "nginx:alpine";
-      ports = [ "127.0.0.1:8000:8000" ];
-      volumes = [
-        "${internalNginxConf}:/etc/nginx/nginx.conf:ro"
-        "${sharedTxs}:/nginx-txs"
-        "${sharedCfg}:/nginx-cfg"
-      ];
-      dependsOn = [
-        "txs-web"
-        "cfg-web"
-        "cgw-web"
-        "events-web"
-        "ui"
-      ];
-    };
-  };
-
-  systemd.services."podman-network-${network}" = {
-    description = "Podman network for the Catacomb stack";
-    wantedBy = [ "multi-user.target" ];
-    after = [ "podman.service" ];
-    before = map (c: "podman-${c}.service") (
-      lib.attrNames config.virtualisation.oci-containers.containers
-    );
     serviceConfig = {
       Type = "oneshot";
       RemainAfterExit = true;
-      ExecStart = "${pkgs.podman}/bin/podman network create --ignore ${network}";
+      ExecStart = pkgs.writeShellScript "catacomb-stack-up" ''
+        set -eu
+        umask 077
+
+        # Generate / reuse runtime secrets (idempotent).
+        gen() {
+          local f="${stateDir}/secrets/$1"
+          [ -e "$f" ] || openssl rand -hex 32 > "$f"
+          cat "$f"
+        }
+        DJANGO_SECRET=$(gen django_secret)
+        CGW_AUTH_TOKEN=$(gen cgw_auth_token)
+        POSTGRES_PASSWORD=$(gen postgres_password)
+        DJANGO_SUPERUSER_PASSWORD=$(gen django_superuser_password)
+
+        cat > ${envFile} <<EOF
+        # Generated by NixOS — edits will be overwritten on next rebuild.
+        ${versionEnvLines}
+        REVERSE_PROXY_PORT=127.0.0.1:8000
+        RPC_NODE_URL=${cfg.chains.etc.rpcUri}
+        DJANGO_SECRET=$DJANGO_SECRET
+        CGW_AUTH_TOKEN=$CGW_AUTH_TOKEN
+        POSTGRES_PASSWORD=$POSTGRES_PASSWORD
+        DJANGO_SUPERUSER_PASSWORD=$DJANGO_SUPERUSER_PASSWORD
+        EOF
+        chmod 600 ${envFile}
+
+        ln -sfn ${override} ${overrideFile}
+
+        ${composeExe} ${composeArgs} pull --quiet
+        ${composeExe} ${composeArgs} up -d --remove-orphans
+      '';
+      ExecStop = pkgs.writeShellScript "catacomb-stack-down" ''
+        ${composeExe} ${composeArgs} down --remove-orphans
+      '';
     };
   };
 
-  # Idempotent chain registration via internal nginx → /cfg/api/v1/chains/.
+  # ── Chain registration ───────────────────────────────────────────────────
+  # Idempotent per chain in `catacomb.chains`. Posts to the internal nginx
+  # the upstream stack stands up on 127.0.0.1:8000 → /cfg/api/v1/chains/.
   systemd.services.catacomb-chain-bootstrap =
     let
-      inherit (config.catacomb.branding) theme;
+      inherit (cfg.branding) theme;
       payloads = lib.mapAttrsToList (
         _name: chain:
         builtins.toJSON {
@@ -418,12 +186,13 @@ in
           inherit (chain) blockExplorerUriTemplate nativeCurrency transactionService;
           theme = { inherit (theme) textColor backgroundColor; };
         }
-      ) config.catacomb.chains;
+      ) cfg.chains;
     in
     {
       description = "Seed Catacomb chains into safe-config-service";
       wantedBy = [ "multi-user.target" ];
-      after = [ "podman-nginx.service" ];
+      after = [ "catacomb-stack.service" ];
+      requires = [ "catacomb-stack.service" ];
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
@@ -431,8 +200,8 @@ in
       path = [ pkgs.curl ];
       script = ''
         set -eu
-        token=$(cat ${secretsDir}/cgw_auth_token)
-        for i in $(seq 1 60); do
+        token=$(cat ${stateDir}/secrets/cgw_auth_token)
+        for i in $(seq 1 90); do
           curl --fail --silent http://127.0.0.1:8000/cfg/api/v1/about/ >/dev/null && break
           sleep 2
         done

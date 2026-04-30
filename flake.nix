@@ -16,9 +16,13 @@
     treefmt-nix.url = "github:numtide/treefmt-nix";
     treefmt-nix.inputs.nixpkgs.follows = "nixpkgs";
 
-    # TODO(safe-wallet): pin upstream SafeWallet monorepo here once URL is confirmed.
-    # safe-wallet.url = "github:<owner>/<safe-wallet-monorepo>";
-    # safe-wallet.flake = false;
+    # Upstream Safe self-hosting orchestration (docker-compose, env files,
+    # internal nginx config). We `docker compose up -d` against this verbatim
+    # rather than re-implement the topology in Nix.
+    safe-infrastructure = {
+      url = "github:safe-global/safe-infrastructure";
+      flake = false;
+    };
   };
 
   outputs =
@@ -107,10 +111,19 @@
         # nixosConfigurations alongside `disko.nixosModules.disko`, then set
         # `catacomb.*` options. See `local/flake.nix.example` for a worked
         # example.
-        nixosModules = {
-          catacomb = ./hosts/catacomb;
-          default = ./hosts/catacomb;
-        };
+        nixosModules =
+          let
+            mkCatacomb =
+              { ... }:
+              {
+                imports = [ ./hosts/catacomb ];
+                _module.args.safe-infrastructure = inputs.safe-infrastructure;
+              };
+          in
+          {
+            catacomb = mkCatacomb;
+            default = mkCatacomb;
+          };
       };
     };
 }

@@ -46,12 +46,7 @@
 
   time.timeZone = config.catacomb.timeZone;
 
-  virtualisation = {
-    podman = {
-      enable = true;
-      dockerSocket.enable = true;
-      defaultNetwork.settings.dns_enabled = true;
-    };
-    oci-containers.backend = "podman";
-  };
+  # Docker (vs podman) — upstream safe-infrastructure compose syntax targets
+  # the Docker CLI; running it under podman-compose hits compatibility edges.
+  virtualisation.docker.enable = true;
 }
