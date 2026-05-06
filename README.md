@@ -1,10 +1,13 @@
 # nix-catacomb
 
 Nix flake that deploys a self-hosted [Safe](https://safe.global) multi-sig
-wallet onto a single VM, branded and configured via Nix module options.
+wallet onto a single VM, configured via Nix module options.
 
-The default chain is **Ethereum Classic** (61), branded as
-*Catacomb Multisig Classix Edition*; both are overrideable.
+The library is **chain-agnostic** and ships with **no branding** — every
+consumer declares the chain(s) it wants registered in `cfg-service`,
+picks one as primary (the chain its bundled `txs` indexer covers), and
+optionally supplies a branding pack to layer custom React patches +
+fonts + assets on top of the upstream wallet bundle.
 
 The stack is upstream `safe-global/safe-infrastructure`'s docker-compose
 project run verbatim against a NixOS-managed Docker daemon, plus a
@@ -21,7 +24,7 @@ The upstream reference deployment is [`safe-global/safe-infrastructure`](https:/
 
 - **Frontend tamper-resistance.** The Nix store is mounted read-only at the kernel level. Modifying the served bundle requires a new build with a new hash; in-place edits aren't a path.
 - **Hash-pinned supply chain.** Upstream's `.env.sample` pulls every Safe service at `:latest`; here we pin exact image tags (see `hosts/catacomb/safe-stack.nix`) and lock every nixpkgs commit, fetched tarball, and transitive dep in `flake.lock`. The "auto-pull a malicious 1.0.1" class (event-stream, ua-parser-js, colors.js) is structurally impossible without an explicit `nix flake update`.
-- **Deterministic, composable patch overlays.** Catacomb branding (`pkgs/catacomb-branding/patches/0001-catacomb-branding.patch`) is layered at build time over a hash-pinned upstream `safe-wallet-monorepo`. Same patch + same upstream → same bundle hash, every time. The full divergence from stock Safe is one diff; no vendored fork to keep in sync.
+- **Deterministic, composable patch overlays.** A consumer's branding pack (a self-contained `{ patches; postPatch; extraEnv; }` set) is layered at build time over a hash-pinned upstream `safe-wallet-monorepo`. Same patch + same upstream → same bundle hash, every time. The full divergence from stock Safe is one diff; no vendored fork to keep in sync.
 - **Server has only what's declared.** NixOS ships no leftover distro utilities and no container-base shells or package managers — every binary, port, service, and user is in `hosts/catacomb/*.nix`, reviewable in a PR diff.
 - **No JS build runs on the host.** Upstream's `safeglobal/safe-wallet-web` container runs `yarn build` (a Next.js compile that executes hundreds of npm packages' build hooks) every time it starts. Here, that compile happens in a Nix sandbox at deploy time elsewhere; the production VM only serves static files.
 - **Atomic rollback.** `nixos-rebuild --rollback` reverts kernel + packages + configs together; a botched deploy is one command back to the prior generation.
@@ -38,9 +41,8 @@ The upstream reference deployment is [`safe-global/safe-infrastructure`](https:/
 ```
 flake.nix                       inputs, devShell, nixosModules.catacomb, packages
 hosts/catacomb/
-  default.nix                   base NixOS (boot, ssh, docker, firewall)
+  default.nix                   base NixOS (boot, ssh, docker, firewall, assertions)
   options.nix                   declares every catacomb.* option
-  defaultConfig.nix             defaults for every option (one obvious place)
   disko.nix                     single-disk BIOS layout
   safe-stack.nix                upstream safe-infrastructure compose stack
   override.yml.tmpl             per-deploy compose override (env, image pins, ui-stub)
@@ -48,19 +50,22 @@ hosts/catacomb/
   ui.nix                        host-served static UI + /assets/ + backend fanout
 pkgs/
   safe-wallet-web/              static `next export` build (pure: src + env in, UI out)
-  catacomb-branding/            branding overlay applied to safe-wallet-web src
-    patches/                    React/CSS patch (header wordmark, footer, modal, favicon)
-    fonts/                      Michroma + Space Grotesk webfonts
-    assets/
-      etc-logo.svg              served at /assets/etc-logo.svg; default favicon SVG
 ```
 
-The branding overlay is toggled by `catacomb.branding.enable` (default
-`true`). When false, the wallet builds vanilla Safe with only
-`branding.appName` swapped via the upstream-supported
-`NEXT_PUBLIC_BRAND_NAME`. When true, the patch + fonts + favicon land
-in the bundle and `branding.{tagline,notification,githubRepoLink,footerLinks,faviconSvg}`
-all become live.
+Branding is opt-in via `catacomb.branding.pack`. When null (default), the
+wallet builds vanilla Safe with only `branding.appName` swapped via the
+upstream-supported `NEXT_PUBLIC_BRAND_NAME`. When set, the pack's
+patches + postPatch script + extra `NEXT_PUBLIC_*` env vars are layered
+into the build. Pack shape:
+
+```
+{ patches  = [ ... ];   # git patches against safe-wallet-monorepo
+  postPatch = '' ... ''; # shell snippet for asset drop-ins
+  extraEnv = { ... };    # NEXT_PUBLIC_* values consumed by the patches
+}
+```
+
+See `consumer.example.nix` for a complete worked example.
 
 ## Deploying guide
 
@@ -83,12 +88,18 @@ Outside of this repo:
 ```sh
 mkdir my-catacomb && cd my-catacomb
 cp /path/to/nix-catacomb/consumer.example.nix flake.nix
-$EDITOR flake.nix      # set domain, acmeEmail, sshAuthorizedKeys
+$EDITOR flake.nix      # set domain, acmeEmail, sshAuthorizedKeys, chains, primaryChain
 nix flake lock
 ```
 
-Required: `domain`, `acmeEmail`, `sshAuthorizedKeys`. Everything else
-inherits from `hosts/catacomb/defaultConfig.nix` in the library.
+Required: `domain`, `acmeEmail`, `sshAuthorizedKeys`, `hostName`,
+`timeZone`, `bootDevice`, `tlsEnabled`, `branding.theme.*`, `chains`,
+`primaryChain`. The library ships almost no defaults — only
+`branding.appName` (vanilla `"Safe Wallet"`), `branding.pack` (`null`),
+`services` (`[ "WALLET_WEB" ]`), `staticAssets` (`null`), and CGW
+tuning fall back to library defaults if you don't set them. See
+`consumer.example.nix` for a copy-paste template with every required
+option filled in.
 
 ### 2. Provision a VM
 
@@ -164,25 +175,21 @@ runtime build on the droplet.
 Per-deploy values are baked at build time via `NEXT_PUBLIC_*` env vars,
 which Next.js inlines into the compiled bundle:
 
-| Env var                                | Source                                  |
-|----------------------------------------|-----------------------------------------|
-| `NEXT_PUBLIC_BRAND_NAME`               | `catacomb.branding.appName`             |
-| `NEXT_PUBLIC_GATEWAY_URL_PRODUCTION`   | `https://<domain>/cgw`                  |
-| `NEXT_PUBLIC_DEFAULT_MAINNET_CHAIN_ID` | `catacomb.chains.etc.chainId`           |
-| `NEXT_PUBLIC_IS_PRODUCTION`            | `"true"`                                |
-| `NEXT_PUBLIC_CATACOMB_TAGLINE`         | `catacomb.branding.tagline`             |
-| `NEXT_PUBLIC_CATACOMB_FOOTER_LINKS`    | `catacomb.branding.footerLinks` (JSON)  |
-| `NEXT_PUBLIC_CATACOMB_GITHUB_REPO`     | `catacomb.branding.githubRepoLink`      |
-| `NEXT_PUBLIC_CATACOMB_NOTIFICATION`    | `catacomb.branding.notification`        |
+| Env var                                | Source                                              |
+|----------------------------------------|-----------------------------------------------------|
+| `NEXT_PUBLIC_BRAND_NAME`               | `catacomb.branding.appName`                         |
+| `NEXT_PUBLIC_GATEWAY_URL_PRODUCTION`   | `https://<domain>/cgw`                              |
+| `NEXT_PUBLIC_DEFAULT_MAINNET_CHAIN_ID` | `catacomb.chains.${primaryChain}.chainId`           |
+| `NEXT_PUBLIC_IS_PRODUCTION`            | `"true"`                                            |
 
-The `NEXT_PUBLIC_CATACOMB_*` family is only meaningful with
-`branding.enable = true` (the patch reads them); with `enable = false`
-they're set to `""` and ignored.
+A consumer's branding pack can spread additional build-time env vars
+into the bundle via `catacomb.branding.pack.extraEnv` — typically
+`NEXT_PUBLIC_*` values its patches read at compile time.
 
-Any change to those values triggers a UI rebuild. ~5–10 min on a 4 vCPU
-box; downstream consumers are expected to wire up their own binary cache
-(substituter + push) so `nixos-rebuild switch` doesn't rebuild the
-bundle on every host.
+Any change to a value baked into the bundle triggers a UI rebuild.
+~5–10 min on a 4 vCPU box; downstream consumers are expected to wire
+up their own binary cache (substituter + push) so `nixos-rebuild switch`
+doesn't rebuild the bundle on every host.
 
 **Theme colors** (`branding.theme.*`) live in chain metadata in
 `cfg-service`, not the bundle — see Chain registration below.
@@ -234,7 +241,7 @@ Single-VM deploy, indexing one or two small EVM chains:
 Initial chain index is dominated by RPC throughput. With a fast/local RPC,
 expect a small chain to fully index in ~12–36h. Postgres footprint is
 governed by Safe density on the chain, not raw chain size — typically
-under 10 GB for a small chain like ETC.
+under 10 GB for a small chain.
 
 Authoritative sizing notes: see [`safe-infrastructure`'s production
 docs](https://github.com/safe-global/safe-infrastructure/blob/main/docs/running_production.md)

@@ -1,5 +1,7 @@
-# Declares every option exposed by this host. No values set here — defaults
-# live in `defaultConfig.nix`, per-deploy overrides in `config.nix`.
+# Declares every option exposed by this host. The library ships almost
+# no defaults — only `branding.appName`, `services`, and a few `null`
+# fallbacks have `default = ...` here. Everything else is mandatory and
+# must be set in your consumer flake.
 { lib, ... }:
 {
   options.catacomb = with lib; {
@@ -9,9 +11,9 @@
       type = types.str;
       example = "catacomb.example.com";
       description = ''
-        Apex hostname. The UI is served here. Client gateway and per-chain
-        transaction services live under `client.`, `transaction-classic.`,
-        `transaction-mordor.` subdomains.
+        Apex hostname. The UI is served here. The internal compose stack
+        exposes its backends behind path prefixes on the apex (`/cgw`,
+        `/cfg`, `/txs`, `/events`).
       '';
     };
 
@@ -54,109 +56,96 @@
       '';
     };
 
+    # ── Static assets ────────────────────────────────────────────────────
+    staticAssets = mkOption {
+      type = types.nullOr types.path;
+      default = null;
+      example = literalExpression "./assets";
+      description = ''
+        Directory served at `https://<domain>/assets/`. Use it for chain
+        logos and any other static file referenced from a chain config
+        (`chains.<name>.nativeCurrency.logoUri`,
+        `chains.<name>.chainLogoUri`). When null, `/assets/` is not
+        served.
+      '';
+    };
+
     # ── Branding ─────────────────────────────────────────────────────────
+    # Three-piece API:
+    #   - appName: maps to NEXT_PUBLIC_BRAND_NAME (upstream-supported).
+    #   - pack:    optional source-tree overlay for richer branding.
+    #   - theme:   colours surfaced via cfg-service on every chain.
     branding = {
-      enable = mkOption {
-        type = types.bool;
-        default = true;
-        description = ''
-          Apply the Catacomb branding overlay (`pkgs/catacomb-branding`)
-          on top of upstream `safe-wallet-monorepo`. When true: header
-          wordmark + tagline, custom footer links, top-of-page
-          notification banner, SVG-only favicon, Catacomb fonts. When
-          false: vanilla Safe wallet with only `branding.appName` swapped
-          via the upstream-supported `NEXT_PUBLIC_BRAND_NAME`. The
-          consumer-supplied tagline/notification/footerLinks/githubRepoLink
-          options become no-ops with `enable = false` (no patch reads them).
-        '';
-      };
       appName = mkOption {
         type = types.str;
+        default = "Safe Wallet";
         example = "Acme Multi-Sig";
-        description = "Product name shown in page title, headers, and footer.";
-      };
-      tagline = mkOption {
-        type = types.str;
-        default = "";
-        example = "classix edition";
         description = ''
-          Subtitle rendered under the app name in the top-left wordmark.
-          Empty string hides the line entirely. Wired into the bundle as
-          `NEXT_PUBLIC_CATACOMB_TAGLINE`. Only meaningful with
-          `branding.enable = true`.
+          Product name shown in page title, headers, and footer. Wired
+          into the bundle as `NEXT_PUBLIC_BRAND_NAME` — the upstream-
+          supported brand swap. Works with or without `branding.pack`.
+          Defaults to upstream Safe's vanilla name.
         '';
       };
-      notification = mkOption {
-        type = types.str;
-        default = "";
-        example = "Demo deploy — do not use with production assets.";
-        description = ''
-          Top-of-page warning banner shown across every route. Empty
-          string hides the banner entirely. Rendered as a MUI
-          `<Alert severity="warning">` above the header. Wired in as
-          `NEXT_PUBLIC_CATACOMB_NOTIFICATION`. Only meaningful with
-          `branding.enable = true`.
-        '';
-      };
-      githubRepoLink = mkOption {
-        type = types.str;
-        default = "";
-        example = "https://github.com/classix-dev/nix-catacomb";
-        description = ''
-          Replaces the upstream `safe-global/safe-wallet-monorepo` URL
-          that the footer's `vX.Y.Z` link points at. Empty string falls
-          through to the upstream default (`APP_HOMEPAGE`). Wired in as
-          `NEXT_PUBLIC_CATACOMB_GITHUB_REPO`. Only meaningful with
-          `branding.enable = true`.
-        '';
-      };
-      footerLinks = mkOption {
-        type = types.listOf (
-          types.submodule {
-            options = {
-              label = mkOption {
-                type = types.str;
-                description = "Visible link text.";
-              };
-              url = mkOption {
-                type = types.str;
-                description = "Target URL — opens in a new tab.";
-              };
+
+      pack = mkOption {
+        type = types.nullOr (types.submodule {
+          options = {
+            patches = mkOption {
+              type = types.listOf types.path;
+              default = [ ];
+              description = ''
+                Git patches applied with `applyPatches` to
+                safe-wallet-monorepo before build. Use these for
+                structural changes to React components / CSS.
+              '';
             };
-          }
-        );
-        default = [ ];
-        example = lib.literalExpression ''
-          [
-            { label = "classix.dev"; url = "https://classix.dev"; }
-          ]
-        '';
+            postPatch = mkOption {
+              type = types.lines;
+              default = "";
+              description = ''
+                Shell snippet appended after `patches` are applied.
+                Use this for drop-in additions of new files (favicons,
+                fonts, replacement assets) via plain `cp` calls.
+              '';
+            };
+            extraEnv = mkOption {
+              type = types.attrsOf types.str;
+              default = { };
+              description = ''
+                Extra build-time env vars passed to `next build`. Use
+                this for any `NEXT_PUBLIC_*` values your patches read
+                at compile time (taglines, footer links, notification
+                banners, …).
+              '';
+            };
+          };
+        });
+        default = null;
         description = ''
-          Links rendered in the footer alongside the version string.
-          Replaces the upstream "unofficial distribution of the app" line.
-          Serialised to JSON and read at build time as
-          `NEXT_PUBLIC_CATACOMB_FOOTER_LINKS`. Only meaningful with
-          `branding.enable = true`.
+          Optional source-tree overlay applied to safe-wallet-monorepo
+          before build. A self-contained set of patches + postPatch
+          script + extra `NEXT_PUBLIC_*` env vars. When null, vanilla
+          Safe is built with only `appName` swapped.
+
+          Consumers typically place their pack under `./branding/` in
+          their flake and pass it here via `pkgs.callPackage`.
         '';
       };
-      faviconSvg = mkOption {
-        type = types.path;
-        default = ../../pkgs/catacomb-branding/assets/etc-logo.svg;
-        description = ''
-          SVG used as the wallet's favicon (and `safari-pinned-tab.svg`).
-          Defaults to the library's ETC chain logo — appropriate for
-          Catacomb deploys built around ETC, which is the canonical
-          chain. Override for non-Classix Catacombs.
-        '';
-      };
+
       theme = {
         textColor = mkOption {
           type = types.str;
           example = "#ffffff";
+          description = ''
+            Theme text colour registered with cfg-service for every
+            chain. Surfaced via `/v2/chains` to clients.
+          '';
         };
         backgroundColor = mkOption {
           type = types.str;
           example = "#000000";
+          description = "Theme background colour registered with cfg-service.";
         };
       };
     };
@@ -203,6 +192,7 @@
     # Listed keys are seeded by `catacomb-chain-bootstrap` on each rebuild.
     services = mkOption {
       type = types.listOf types.str;
+      default = [ "WALLET_WEB" ];
       example = [
         "WALLET_WEB"
         "MOBILE"
@@ -215,6 +205,24 @@
     };
 
     # ── Chains (registered in safe-config-service at first boot) ─────────
+    # The bundled compose project ships a single `txs` indexer, so exactly
+    # one chain in `chains` is "primary" (its RPC URL and chain id are
+    # baked into the indexer + the wallet bundle). Multi-chain operation
+    # requires running additional `txs` stacks out of band.
+    primaryChain = mkOption {
+      type = types.str;
+      example = "etc";
+      description = ''
+        Attrset key in `chains` of the chain whose RPC URL and chain id
+        are baked into the upstream `txs` indexer (via the compose
+        override) and the wallet bundle's
+        `NEXT_PUBLIC_DEFAULT_MAINNET_CHAIN_ID`. Must match a key in
+        `chains`. Other chains in `chains` are still registered with
+        cfg-service but their transactions are not indexed by this
+        deployment.
+      '';
+    };
+
     chains = mkOption {
       type = types.attrsOf (
         types.submodule {

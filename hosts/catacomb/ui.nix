@@ -3,19 +3,17 @@
 # `next build` at boot — see README.md "Why Nix?" and the package
 # derivation at `pkgs/safe-wallet-web`.
 #
-# When `catacomb.branding.enable = true` (default), the upstream source
-# is layered with the Catacomb branding overlay (`pkgs/catacomb-branding`)
-# before being passed to the build: header wordmark + tagline, custom
-# footer links, top-of-page notification banner, SVG-only favicon,
-# Catacomb fonts. With `enable = false` the wallet builds vanilla, with
-# only `branding.appName` swapped via the upstream-supported
+# Source-tree branding is opt-in via `catacomb.branding.pack`. When set,
+# the upstream monorepo source is patched (`pack.patches`), files are
+# dropped in (`pack.postPatch`), and extra `NEXT_PUBLIC_*` env vars
+# (`pack.extraEnv`) are passed to `next build`. When null, vanilla Safe
+# is built with only `branding.appName` swapped via the upstream-supported
 # `NEXT_PUBLIC_BRAND_NAME`.
 #
 # Branding, gateway URL, and chain id are baked into the bundle at Nix
 # eval time, so any change to `config.catacomb.branding` /
-# `config.catacomb.domain` / `config.catacomb.chains.etc.chainId` will
-# trigger a UI rebuild. Cachix substituters absorb the cost when nothing
-# changed.
+# `config.catacomb.domain` / the primary chain's id will trigger a UI
+# rebuild. Cachix substituters absorb the cost when nothing changed.
 {
   config,
   lib,
@@ -30,10 +28,11 @@ let
   scheme = if tls then "https" else "http";
 
   brandedSrc =
-    if cfg.branding.enable then
-      pkgs.callPackage ../../pkgs/catacomb-branding {
+    if cfg.branding.pack != null then
+      pkgs.applyPatches {
+        name = "safe-wallet-monorepo-branded";
         src = safe-wallet-web;
-        inherit (cfg.branding) faviconSvg;
+        inherit (cfg.branding.pack) patches postPatch;
       }
     else
       safe-wallet-web;
@@ -42,27 +41,14 @@ let
     src = brandedSrc;
     inherit (cfg.branding) appName;
     gatewayUrl = "${scheme}://${d}/cgw";
-    defaultChainId = cfg.chains.etc.chainId;
+    defaultChainId = cfg.chains.${cfg.primaryChain}.chainId;
     isProduction = true;
 
-    # Catacomb-specific env vars are only meaningful when the branding
-    # patch is in the source. With `enable = false` the patch is absent
-    # and these would land as unread env vars in the bundle.
-    extraEnv = lib.optionalAttrs cfg.branding.enable {
-      NEXT_PUBLIC_CATACOMB_TAGLINE = cfg.branding.tagline;
-      NEXT_PUBLIC_CATACOMB_FOOTER_LINKS = builtins.toJSON cfg.branding.footerLinks;
-      NEXT_PUBLIC_CATACOMB_GITHUB_REPO = cfg.branding.githubRepoLink;
-      NEXT_PUBLIC_CATACOMB_NOTIFICATION = cfg.branding.notification;
-    };
+    # Build-time env vars from the branding pack are only meaningful when
+    # the pack is non-null (the patches that read them are only applied
+    # then). Empty `{}` for a vanilla build.
+    extraEnv = lib.optionalAttrs (cfg.branding.pack != null) cfg.branding.pack.extraEnv;
   };
-
-  # Static assets served at https://${domain}/assets/. Currently just
-  # the ETC chain logo, used both as the chain logo (referenced by
-  # `chains.etc.{nativeCurrency.logoUri, chainLogoUri}`) and as the
-  # default favicon SVG inside the wallet bundle. Lives under
-  # `pkgs/catacomb-branding/assets/` so the branding module owns its
-  # own visual identity.
-  staticAssets = ../../pkgs/catacomb-branding/assets;
 in
 {
   services.nginx.virtualHosts."${d}" = {
@@ -74,12 +60,12 @@ in
       tryFiles = "$uri $uri.html $uri/ /index.html";
     };
 
-    # Library-shipped assets (chain logos, etc.). Serves
-    # `assets/etc-logo.svg` at `/assets/etc-logo.svg`. Consumers can
-    # extend this by adding their own `services.nginx.virtualHosts.${d}.locations."/assets/<name>".alias = "${./path-to-extra-assets}/";`
-    # if they need additional chain logos.
-    locations."/assets/" = {
-      alias = "${staticAssets}/";
+    # Consumer-supplied static assets at /assets/. Used for chain logos
+    # (referenced by `chains.<name>.{nativeCurrency.logoUri, chainLogoUri}`)
+    # and any other static file the consumer wants to serve at that
+    # prefix. Dropped entirely when `staticAssets` is null.
+    locations."/assets/" = lib.mkIf (cfg.staticAssets != null) {
+      alias = "${cfg.staticAssets}/";
       extraConfig = ''
         add_header Cache-Control "public, max-age=86400";
       '';
