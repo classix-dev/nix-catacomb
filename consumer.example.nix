@@ -3,7 +3,7 @@
 #
 #   mkdir my-catacomb && cd my-catacomb
 #   cp /path/to/nix-catacomb/consumer.example.nix flake.nix
-#   $EDITOR flake.nix                # set domain, acmeEmail, sshAuthorizedKeys
+#   $EDITOR flake.nix                # set domain, acmeEmail, sshAuthorizedKeys, chains
 #   nix flake lock
 #
 # Then provision a fresh VM (Debian/Ubuntu, our SSH key preinstalled,
@@ -17,10 +17,10 @@
 #
 #   nixos-rebuild switch --flake .#catacomb --target-host root@<vm-ip>
 #
-# Only the per-deploy identity at the top of `let` and a few NixOS-level
-# overrides for the chosen cloud provider live here. Everything else
-# (Catacomb branding, ETC chain config, RPC CORS proxy, cfg-service URL
-# rewrite) is inherited from the library's `hosts/catacomb/defaultConfig.nix`.
+# nix-catacomb is library-only and ships almost no defaults — every
+# required `catacomb.*` option must be set explicitly here. Options
+# without a `default = ...` in `hosts/catacomb/options.nix` are
+# required; the rest fall back to library defaults.
 {
   description = "My Catacomb deploy";
 
@@ -44,6 +44,7 @@
       domain = "your.example.com";
       acmeEmail = "ops@your.example.com";
       timeZone = "UTC";
+      hostName = "my-safe";
 
       # SSH key(s) that may log in to root post-install. NixOS replaces
       # whatever the cloud-init bootstrap put in /root/.ssh/authorized_keys
@@ -91,90 +92,102 @@
                   ];
                 };
 
-                # ── Catacomb options ───────────────────────────────────
-                # Required: domain, acmeEmail, sshAuthorizedKeys, timeZone.
-                # Everything else inherits from
-                # `nix-catacomb/hosts/catacomb/defaultConfig.nix` —
-                # uncomment any of the optional blocks below to override.
                 catacomb = {
                   inherit
                     domain
                     acmeEmail
                     timeZone
+                    hostName
                     sshAuthorizedKeys
                     ;
 
+                  bootDevice = "/dev/vda";
+                  tlsEnabled = true;
+
                   # ── Branding ────────────────────────────────────────
-                  # Library defaults render the canonical Catacomb look
-                  # (Classix-flavored: green accent, Michroma + Space
-                  # Grotesk wordmark, classix.dev footer link). Override
-                  # any subset to brand your deploy. Drop a key entirely
-                  # to inherit the library default.
+                  # `appName` defaults to "Safe Wallet" (vanilla). Theme
+                  # colours have no library default and must be set —
+                  # they're surfaced via cfg-service to clients on every
+                  # chain.
                   branding = {
                     appName = "Acme Multi-Sig";
-                    tagline = "operator preview";
-                    githubRepoLink = "https://github.com/your-org/your-fork";
-                    footerLinks = [
-                      {
-                        label = "ops.acme.com";
-                        url = "https://ops.acme.com";
-                      }
-                    ];
+
                     theme = {
                       textColor = "#ffffff";
                       backgroundColor = "#000000";
                     };
 
-                    # Top-of-page modal shown once per browser session.
-                    # Empty string (default) hides it entirely. Useful
-                    # for demo / staging deploys.
-                    notification = "Demo deploy — do not use with production assets.";
-
-                    # SVG used as the wallet's favicon. Defaults to the
-                    # library's ETC chain logo. Point at a path in your
-                    # consumer flake to override:
-                    # faviconSvg = ./my-favicon.svg;
-
-                    # Disable the whole branding overlay (ship vanilla
-                    # Safe with only `appName` swapped via the
-                    # upstream-supported NEXT_PUBLIC_BRAND_NAME):
-                    # enable = false;
+                    # Drop a self-contained branding pack here for
+                    # source-tree overlays (custom React patches +
+                    # assets + env vars). Typical shape: a
+                    # `./branding/default.nix` that returns
+                    # `{ patches; postPatch; extraEnv; }`.
+                    #
+                    # pack = import ./branding { };
                   };
 
-                  # ── Optional: chains ───────────────────────────────
-                  # Library default is Ethereum Classic mainnet (61),
-                  # routed through a local CORS-injecting proxy at
-                  # rpc.<domain>. To use a different chain, replace the
-                  # whole `chains` attribute. Note that adding a chain
-                  # also requires a parallel `txs` indexer per chain —
-                  # the bundled compose project indexes one.
-                  #
-                  # chains.etc = {
-                  #   chainId    = 61;
-                  #   shortName  = "etc";
-                  #   chainName  = "Ethereum Classic";
-                  #   isTestnet  = false;
-                  #   rpcUri     = "https://my-private-etc-node.example.com";
-                  #   transactionService = "https://${domain}/txs";
-                  #   blockExplorerUriTemplate = {
-                  #     address = "https://blockscout.com/etc/mainnet/address/{{address}}";
-                  #     txHash  = "https://blockscout.com/etc/mainnet/tx/{{txHash}}";
-                  #     api     = "https://blockscout.com/etc/mainnet/api?module={{module}}&action={{action}}&address={{address}}&apiKey={{apiKey}}";
-                  #   };
-                  #   nativeCurrency = {
-                  #     name    = "Ether Classic";
-                  #     symbol  = "ETC";
-                  #     decimals = 18;
-                  #     logoUri = "https://${domain}/assets/etc-logo.svg";
-                  #   };
-                  #   chainLogoUri = "https://${domain}/assets/etc-logo.svg";
-                  # };
+                  # ── Chains (required) ──────────────────────────────
+                  # Declare each chain you want registered with
+                  # cfg-service. The primary chain is also wired into
+                  # the bundled `txs` indexer and the wallet bundle.
+                  primaryChain = "etc";
+                  chains.etc = {
+                    chainId    = 61;
+                    shortName  = "etc";
+                    chainName  = "Ethereum Classic";
+                    isTestnet  = false;
+                    rpcUri     = "https://my-private-etc-node.example.com";
+                    transactionService = "https://${domain}/txs";
+                    blockExplorerUriTemplate = {
+                      address = "https://blockscout.com/etc/mainnet/address/{{address}}";
+                      txHash  = "https://blockscout.com/etc/mainnet/tx/{{txHash}}";
+                      api     = "https://blockscout.com/etc/mainnet/api?module={{module}}&action={{action}}&address={{address}}&apiKey={{apiKey}}";
+                    };
+                    nativeCurrency = {
+                      name    = "Ether Classic";
+                      symbol  = "ETC";
+                      decimals = 18;
+                      logoUri = "https://${domain}/assets/etc-logo.svg";
+                    };
+                    chainLogoUri = "https://${domain}/assets/etc-logo.svg";
+                  };
+
+                  # Directory served at `/assets/`. Use it for any chain
+                  # logo referenced from a chain config above. Optional.
+                  # staticAssets = ./assets;
 
                   # ── Optional: cfg-service service keys ─────────────
                   # Default `[ "WALLET_WEB" ]`. Add "MOBILE" if you also
                   # serve a mobile app pointing at this gateway.
                   # services = [ "WALLET_WEB" "MOBILE" ];
                 };
+
+                # ── Chain-RPC plumbing (consumer responsibility) ────────
+                # If your chain's public RPC doesn't return CORS headers
+                # (most don't), the wallet's browser-side fetches will
+                # fail preflight. A common pattern is to terminate a
+                # `rpc.<domain>` virtualhost on this host and proxy to
+                # the upstream with permissive CORS. Set
+                # `chains.<name>.rpcUri = "https://rpc.${domain}"`
+                # above and add the proxy below.
+                #
+                # services.nginx.virtualHosts."rpc.${domain}" = {
+                #   forceSSL = true;
+                #   enableACME = true;
+                #   locations."/".extraConfig = ''
+                #     proxy_pass https://upstream-rpc.example.com;
+                #     proxy_ssl_server_name on;
+                #     proxy_set_header Host upstream-rpc.example.com;
+                #     # CORS preflight + permissive responses
+                #     if ($request_method = OPTIONS) {
+                #       add_header Access-Control-Allow-Origin  "*" always;
+                #       add_header Access-Control-Allow-Methods "POST, GET, OPTIONS" always;
+                #       add_header Access-Control-Allow-Headers "Content-Type, Authorization" always;
+                #       return 204;
+                #     }
+                #     add_header Access-Control-Allow-Origin "*" always;
+                #   '';
+                # };
               };
             }
           )

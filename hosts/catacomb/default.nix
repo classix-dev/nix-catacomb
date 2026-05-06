@@ -5,6 +5,7 @@
 # for the option surface, set values in your consumer flake.
 {
   config,
+  lib,
   modulesPath,
   ...
 }:
@@ -12,11 +13,20 @@
   imports = [
     (modulesPath + "/installer/scan/not-detected.nix")
     ./options.nix
-    ./defaultConfig.nix
     ./disko.nix
     ./safe-stack.nix
     ./nginx.nix
     ./ui.nix
+  ];
+
+  assertions = [
+    {
+      assertion = lib.hasAttr config.catacomb.primaryChain config.catacomb.chains;
+      message = ''
+        catacomb.primaryChain ("${config.catacomb.primaryChain}") must be a key in catacomb.chains.
+        Available chains: ${lib.concatStringsSep ", " (lib.attrNames config.catacomb.chains)}.
+      '';
+    }
   ];
 
   system.stateVersion = "25.05";

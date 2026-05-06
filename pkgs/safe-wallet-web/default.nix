@@ -21,9 +21,9 @@
   defaultChainId ? 1,
   isProduction ? true,
   # Additional NEXT_PUBLIC_* / build-time env vars, spread onto the
-  # derivation. Used by the Catacomb branding overlay to inject its
-  # NEXT_PUBLIC_CATACOMB_TAGLINE / _FOOTER_LINKS / _GITHUB_REPO /
-  # _NOTIFICATION values. Empty `{}` for a vanilla Safe build.
+  # derivation. Used by a consumer's branding pack to inject any
+  # NEXT_PUBLIC_* values its patches read at compile time. Empty `{}`
+  # for a vanilla Safe build.
   extraEnv ? { },
 }:
 let
@@ -112,8 +112,8 @@ stdenv.mkDerivation (
       echo '[]' > apps/web/src/config/__generated__/chains.json
 
       # Show 2 decimal places for fiat values under $100. Upstream's
-      # threshold is $1, which renders e.g. ETC at $8.41 as "$8" — fine
-      # for $bn portfolios, terrible for low-cap chains.
+      # threshold is $1, which renders e.g. a token priced at $8.41 as
+      # "$8" — fine for $bn portfolios, terrible for low-cap chains.
       substituteInPlace packages/utils/src/utils/formatNumber.ts \
         --replace-fail 'Math.abs(float) >= 1 || float === 0 ? 0 : 2' \
                        'Math.abs(float) >= 100 || float === 0 ? 0 : 2'
